@@ -1,0 +1,196 @@
+# =========================================================
+# OS junk
+# =========================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+
+# =========================================================
+# Python
+# =========================================================
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.python-version
+
+# C extensions / compiled artifacts
+*.so
+*.dylib
+*.dll
+
+# Packaging / build
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+
+# Test / coverage / typecheck caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.pyright/
+.pytype/
+.ruff_cache/
+.hypothesis/
+.dmypy.json
+.pyre/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# =========================================================
+# Tooling / dependency managers
+# =========================================================
+
+# uv
+.uv/
+
+# PDM
+.pdm-python
+.pdm.toml
+.pdm-build/
+
+# Hatch
+.hatch/
+
+# =========================================================
+# Editors / IDEs
+# =========================================================
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+*.iml
+
+# Vim / Neovim
+*.swp
+*.swo
+Session.vim
+
+# Sublime / misc
+*.sublime-project
+*.sublime-workspace
+
+# =========================================================
+# Logs / runtime artifacts
+# =========================================================
+
+*.log
+logs/
+log/
+tmp/
+temp/
+.cache/
+
+# Runtime dumps / traces
+*.out
+*.err
+*.pid
+*.stackdump
+
+# JSONL / session traces / forensics / reports
+*.jsonl
+sessions/
+artifacts/
+reports/
+forensics/
+diagnostics/
+
+# =========================================================
+# Project-specific generated data
+# =========================================================
+
+# Terrain / nav generation outputs
+heightmaps/
+maps/
+terrain_cache/
+nav_cache/
+waypoint_cache/
+zone_cache/
+
+# Local-only runtime files
+config/
+*.ini.local
+
+# Reverse engineering scratch / local notes
+ghidra_projects/
+ghidra/
+scratch/
+notes/
+local_notes/
+
+# Screenshots / captures / ad hoc debugging
+screenshots/
+captures/
+recordings/
+
+# =========================================================
+# Secrets / local env
+# =========================================================
+
+.env
+.env.*
+*.secret
+secrets/
+local.env
+
+# =========================================================
+# Documentation build artifacts
+# =========================================================
+
+docs/_build/
+docs/site/
+
+# Mermaid / exported diagrams if generated locally
+*.mmd.svg
+*.mmd.png
+*.mermaid.png
+
+# =========================================================
+# Misc
+# =========================================================
+
+# Internal dev docs (not shipped to GitHub)
+plans/
+archive/
+CONTRIBUTING.md
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Data (runtime-generated, internal reference)
+data/
