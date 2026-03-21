@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --dev
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
+      - run: uv run vulture src/ scripts/vulture_whitelist.py --min-confidence 90
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --dev
+      - run: uv run mypy src/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --dev
+      - name: Run tests with coverage
+        run: uv run pytest tests/ -v --hypothesis-profile=ci --cov --cov-report=term-missing --cov-report=json
+      - name: Extract coverage percentage
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: cov
+        run: |
+          total=$(python3 -c "import json; print(int(json.load(open('coverage.json'))['totals']['percent_covered_display']))")
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+      - name: Update coverage badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: ${{ vars.COVERAGE_GIST_ID }}
+          filename: coverage.json
+          label: Coverage
+          message: ${{ steps.cov.outputs.total }}%
+          valColorRange: ${{ steps.cov.outputs.total }}
+          minColorRange: 50
+          maxColorRange: 100
