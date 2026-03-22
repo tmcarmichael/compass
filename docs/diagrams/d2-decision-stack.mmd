@@ -1,0 +1,40 @@
+---
+config:
+  look: neo
+  theme: neutral
+---
+flowchart TD
+    %% Decision stack: three mechanisms in strict precedence.
+    %% ER is a structural veto: evaluates before any plan step executes, cannot be outbid.
+    %% "GOAP proposes, priorities dispose" = ER can invalidate any active plan at any tick.
+
+    ER["Emergency Rules<br/>FLEE · DEATH_RECOVERY · FEIGN_DEATH<br/><b>structural veto: evaluates first, every tick</b>"]
+
+    GP["GOAP Planner<br/>A* on goal-state space · 3–8 steps<br/>learned cost functions · spawn prediction"]
+
+    %% Reactive selection is the fallback when no plan is active, not the primary path.
+    PR["Reactive Selection<br/>Priority Rules + Utility Scoring<br/>oscillation prevention · lock-in semantics"]
+
+    RO["Routines<br/>non-blocking state machines · enter · tick · exit<br/>tick() must return within 200ms"]
+
+    ER -->|"emergency fires"| RO
+    ER -->|"no emergency"| GP
+    GP -->|"active plan"| RO
+    %% "no active/valid plan": plan may have been invalidated by a world-state change.
+    GP -.->|"no active/valid plan"| PR
+    PR -->|"winning routine activates"| RO
+
+    classDef emergency  fill:#1F3A4A,stroke:#0D1F2A,stroke-width:3px,color:#ffffff
+    classDef planner    fill:#EAF4FB,stroke:#2E5E7E,stroke-width:2px,color:#1F3A4A
+    classDef reactive   fill:#F6FAFD,stroke:#5F89A8,stroke-width:1.5px,color:#1F3A4A
+    classDef execution  fill:#F0F4F8,stroke:#5F89A8,stroke-width:1.5px,color:#1F3A4A
+
+    class ER emergency
+    class GP planner
+    class PR reactive
+    class RO execution
+
+    %% 0: ER→RO  |  1,2: ER→GP, GP→RO  |  3,4: GP→PR, PR→RO
+    linkStyle 0 stroke:#B66A2C,stroke-width:2px
+    linkStyle 1,2 stroke:#2E5E7E,stroke-width:2px
+    linkStyle 3,4 stroke:#5F89A8,stroke-width:1.5px

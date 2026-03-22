@@ -1,0 +1,50 @@
+---
+config:
+  look: neo
+  theme: neutral
+---
+flowchart TD
+    %% One encounter signal drives four learning systems at distinct cadences.
+    %% Orange = external input signals. Blue = internal learners. Darker blue = sink.
+
+    CO(["Combat Outcomes<br/>duration · mana spent · HP lost<br/>survival · pet death · extra npcs encountered"])
+
+    PE(["Perception Events<br/>entity sightings · danger events<br/>spawn tracking"])
+
+    SP(["Session Performance Data<br/>defeat rate · uptime · pull success<br/>pathing quality · mana efficiency"])
+
+    EH["Encounter History<br/>strategy fitness · danger score<br/><i>cadence: each combat exit</i>"]
+
+    %% SM receives from both CO and PE. Sightings are not combat-exit-driven.
+    SM["Spatial Memory<br/>50-unit heat map · 4-hour decay<br/><i>cadence: continuous</i>"]
+
+    WL["Weight Tuner<br/>15-factor finite-difference gradient · ±20% bounded<br/><i>cadence: per defeat · ~100 to converge</i>"]
+
+    SS["Session Scorecard<br/>7-dimension performance grading<br/>roam radius · add limit · mana conservation level<br/><i>cadence: every 30 minutes</i>"]
+
+    %% Collapsed consumer view. Actual consumers: GOAP costs, utility weights,
+    %% target scoring, rule thresholds (via AgentContext), strategy selection.
+    DS["Decision System / AgentContext<br/>GOAP cost model · target scoring<br/>utility weights · rule thresholds · spawn positioning"]
+
+    CO --> EH
+    CO -->|"defeat location · timestamp"| SM
+    CO --> WL
+    PE -->|"sighting records · danger events"| SM
+    SP --> SS
+
+    EH -->|"encounter cost estimates<br/>strategy fitness override"| DS
+    SM -->|"target score bias<br/>spawn positioning"| DS
+    WL -->|"tuned scoring weights"| DS
+    SS -->|"auto-tuned thresholds<br/>via AgentContext"| DS
+
+    classDef input    fill:#FDF5EC,stroke:#C07A45,stroke-width:1.5px,color:#1F3A4A
+    classDef learner  fill:#EAF4FB,stroke:#2E5E7E,stroke-width:2px,color:#1F3A4A
+    classDef sink     fill:#C8DFF0,stroke:#2E5E7E,stroke-width:2.5px,color:#1F3A4A
+
+    class CO,PE,SP input
+    class EH,SM,WL,SS learner
+    class DS sink
+
+    %% 0–4: CO→EH, CO→SM, CO→WL, PE→SM, SP→SS  |  5–8: learners→DS
+    linkStyle 0,1,2,3,4 stroke:#B66A2C,stroke-width:1.5px
+    linkStyle 5,6,7,8 stroke:#2E5E7E,stroke-width:2px
