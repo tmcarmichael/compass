@@ -107,7 +107,7 @@ The brain runs a three-layer decision stack. Each layer adds capability; the lay
 
 ### Routines
 
-Behaviors are implemented as state machines with an `enter` / `tick` / `exit` lifecycle. The contract: `tick()` must return within 200ms. No blocking sleeps, no polling loops; routines advance through phases, check conditions, and return `RUNNING` each tick until complete. The brain evaluates emergency rules between every tick; the agent can always flee regardless of what routine is running.
+Behaviors are implemented as state machines with an `enter` / `tick` / `exit` lifecycle. Routines use interruptible sleeps for real-time motor timing (cast bars, movement delays); all sleeps poll a FLEE-aware interrupt predicate every 100ms, so emergency rules can break through within one poll interval. A 5-second hard-kill threshold force-exits any routine that exceeds its tick budget. Combat casting pipelines legitimately run 2-3 seconds, so the threshold sits above that range.
 
 Lock-in semantics (`locked = True`) protect multi-step sequences from premature interruption. A pull mid-flight, a death recovery sequence, a multi-step engagement: once locked, only emergency rules can override. Without this, lower-priority rules interrupt half-completed actions the moment they momentarily become relevant.
 

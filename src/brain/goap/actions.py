@@ -149,9 +149,9 @@ class DefeatAction(PlanAction):
                 mana_costs.append(stats.avg_mana / max_mana)
             hp_costs.append(stats.avg_hp_lost)
         if mana_costs:
-            self._learned_mana_delta = sum(mana_costs) / len(mana_costs)
+            object.__setattr__(self, "_learned_mana_delta", sum(mana_costs) / len(mana_costs))
         if hp_costs:
-            self._learned_hp_delta = sum(hp_costs) / len(hp_costs)
+            object.__setattr__(self, "_learned_hp_delta", sum(hp_costs) / len(hp_costs))
 
 
 class BuffAction(PlanAction):

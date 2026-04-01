@@ -106,18 +106,25 @@ class Scenario:
         """
         states: list[tuple[GameState, str]] = []
         npc_id = 100
+        # Camp center; agent drifts around it between pulls
+        camp_x, camp_y = 200.0, 150.0
 
         for i in range(cycles):
             npc_id += 1
+            npc_x = camp_x + 60.0 + (i % 3) * 20.0
+            npc_y = camp_y + 30.0 - (i % 2) * 40.0
             npc = _spawn(
-                spawn_id=npc_id, name="a_skeleton", x=80.0, y=0.0, level=10, hp_current=500, hp_max=500
+                spawn_id=npc_id, name="a_skeleton", x=npc_x, y=npc_y, level=10, hp_current=500, hp_max=500
             )
 
-            # Idle at camp (targets visible)
-            for _ in range(30):
+            # Idle at camp (targets visible, agent drifts slightly)
+            for t in range(30):
+                drift = float(t) * 0.5
                 states.append(
                     (
                         _state(
+                            x=camp_x + drift,
+                            y=camp_y + drift * 0.3,
                             hp_current=1000,
                             mana_current=500,
                             spawns=(npc,),
@@ -126,11 +133,16 @@ class Scenario:
                     )
                 )
 
-            # Acquire + pull phase
-            for _ in range(20):
+            # Acquire + pull phase (agent moves toward NPC)
+            for t in range(20):
+                frac = t / 20
+                px = camp_x + 15.0 + (npc_x - camp_x - 15.0) * frac
+                py = camp_y + (npc_y - camp_y) * frac
                 states.append(
                     (
                         _state(
+                            x=px,
+                            y=py,
                             hp_current=1000,
                             mana_current=480,
                             target=npc,
@@ -140,15 +152,15 @@ class Scenario:
                     )
                 )
 
-            # Combat: HP/mana drain, target HP drops
+            # Combat: HP/mana drain, target HP drops (agent near NPC)
             for t in range(60):
                 frac = t / 60
                 target_hp = max(1, int(500 * (1 - frac)))
                 dmg_npc = _spawn(
                     spawn_id=npc_id,
                     name="a_skeleton",
-                    x=60.0,
-                    y=0.0,
+                    x=npc_x,
+                    y=npc_y,
                     level=10,
                     hp_current=target_hp,
                     hp_max=500,
@@ -156,6 +168,8 @@ class Scenario:
                 states.append(
                     (
                         _state(
+                            x=npc_x - 10.0 + frac * 3.0,
+                            y=npc_y + frac * 2.0,
                             hp_current=int(1000 * (1 - frac * 0.15)),
                             mana_current=int(500 * (1 - frac * 0.40)),
                             in_combat=True,
@@ -166,13 +180,17 @@ class Scenario:
                     )
                 )
 
-            # Victory: target dead, rest needed
+            # Victory: target dead, rest (agent walks back toward camp)
             mana_after = max(50, 500 - i * 30)
             for t in range(50):
                 frac = t / 50
+                px = npc_x + (camp_x - npc_x) * frac
+                py = npc_y + (camp_y - npc_y) * frac
                 states.append(
                     (
                         _state(
+                            x=px,
+                            y=py,
                             hp_current=int(850 + 150 * frac),
                             mana_current=int(mana_after + (500 - mana_after) * frac),
                             stand_state=1 if frac < 0.8 else 0,  # sitting to rest
@@ -191,12 +209,15 @@ class Scenario:
         """
         states: list[tuple[GameState, str]] = []
         npc = _spawn(spawn_id=200, name="a_ghoul", x=40.0, y=0.0, level=12, hp_current=800, hp_max=800)
+        camp_x, camp_y = 100.0, 80.0
 
         # Healthy start
-        for _ in range(30):
+        for t in range(30):
             states.append(
                 (
                     _state(
+                        x=camp_x + float(t) * 0.5,
+                        y=camp_y + float(t) * 0.3,
                         hp_current=1000,
                         mana_current=500,
                         spawns=(npc,),
@@ -205,13 +226,15 @@ class Scenario:
                 )
             )
 
-        # Gradual damage ramp
+        # Gradual damage ramp (agent near NPC)
         for t in range(80):
             frac = t / 80
             hp = int(1000 * (1 - frac * 0.7))
             states.append(
                 (
                     _state(
+                        x=npc.x + 10.0 + frac * 2.0,
+                        y=npc.y + frac * 1.5,
                         hp_current=hp,
                         mana_current=300,
                         in_combat=True,
@@ -223,10 +246,12 @@ class Scenario:
             )
 
         # Critical: should trigger FLEE
-        for _ in range(30):
+        for t in range(30):
             states.append(
                 (
                     _state(
+                        x=npc.x + 10.0 + float(t) * 3.0,
+                        y=npc.y + float(t) * 2.0,
                         hp_current=250,
                         mana_current=100,
                         in_combat=True,
@@ -237,12 +262,14 @@ class Scenario:
                 )
             )
 
-        # Fleeing: out of combat, recovering
+        # Fleeing: out of combat, recovering (running away)
         for t in range(40):
             frac = t / 40
             states.append(
                 (
                     _state(
+                        x=npc.x + 100.0 + float(t) * 2.0,
+                        y=npc.y + 60.0 + float(t) * 1.5,
                         hp_current=int(250 + 400 * frac),
                         mana_current=int(100 + 200 * frac),
                     ),
@@ -250,12 +277,14 @@ class Scenario:
                 )
             )
 
-        # Second wave: adds appear
+        # Second wave: adds appear (agent re-engaged)
         add = _spawn(spawn_id=201, name="a_skeleton", x=30.0, y=10.0, level=11, hp_current=400, hp_max=400)
-        for _ in range(40):
+        for t in range(40):
             states.append(
                 (
                     _state(
+                        x=npc.x + 15.0 + float(t) * 0.5,
+                        y=npc.y + float(t) * 0.3,
                         hp_current=650,
                         mana_current=300,
                         in_combat=True,

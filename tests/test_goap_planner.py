@@ -11,11 +11,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from brain.context import AgentContext
+from brain.learning.encounters import FightHistory
 from brain.goap.actions import PlanAction, build_action_set
 from brain.goap.goals import Goal, build_goal_set
 from brain.goap.planner import GOAPPlanner, Plan, _Node
 from brain.goap.world_state import PlanWorldState
-from tests.factories import make_plan_world_state
+from tests.factories import make_fight_record, make_plan_world_state
 
 
 @pytest.fixture
@@ -43,12 +45,36 @@ class TestPlanGeneration:
         if plan is not None:
             assert len(plan.steps) > 0
 
+    def test_ready_state_with_targets_can_generate_gain_xp_cycle(self, planner: GOAPPlanner) -> None:
+        ws = PlanWorldState(
+            hp_pct=0.8,
+            mana_pct=0.7,
+            pet_alive=True,
+            buffs_active=True,
+            targets_available=5,
+        )
+        plan = planner.generate(ws)
+
+        assert plan is not None
+        assert [step.name for step in plan.steps] == ["acquire", "pull", "defeat"]
+
     def test_satisfied_state_may_return_none(self, planner: GOAPPlanner) -> None:
         ws = PlanWorldState(hp_pct=1.0, mana_pct=1.0, pet_alive=True, targets_available=0)
         plan = planner.generate(ws)
         # With no targets and full resources, planner may find nothing to do
         if plan is not None:
             assert len(plan.steps) > 0
+
+    def test_generate_with_learned_fight_history_does_not_raise(self, planner: GOAPPlanner) -> None:
+        ctx = AgentContext()
+        ctx.fight_history = FightHistory()
+        for _ in range(3):
+            ctx.fight_history.record(**make_fight_record())
+
+        ws = PlanWorldState(hp_pct=0.8, mana_pct=0.7, pet_alive=True, buffs_active=True, targets_available=3)
+        plan = planner.generate(ws, ctx)
+
+        assert plan is not None
 
 
 # ---------------------------------------------------------------------------

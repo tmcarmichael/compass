@@ -29,7 +29,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--sessions", type=int, default=5, help="Sessions for converge mode (default: 5)")
     p.add_argument("--trace", action="store_true", help="Include per-tick trace in output")
     p.add_argument("--output", metavar="PATH", help="Write results as JSON to file")
-    p.add_argument("--utility-phase", type=int, default=0, help="Utility scoring phase 0-3")
+    p.add_argument("--utility-phase", type=int, default=2, help="Utility scoring phase 0-4")
     p.add_argument("--no-goap", action="store_true", help="Disable GOAP planner")
     p.add_argument("--quiet", action="store_true", help="Suppress terminal output")
     return p.parse_args()

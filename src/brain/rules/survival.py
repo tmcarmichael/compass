@@ -438,7 +438,13 @@ def _should_flee(state: GameState, ctx: AgentContext) -> bool:
 def _score_flee(state: GameState, ctx: AgentContext) -> float:
     if not flags.flee:
         return 0.0
-    return compute_flee_urgency(ctx, state)
+    if _flee_safety_floors(ctx, state):
+        return 1.0
+
+    urgency = compute_flee_urgency(ctx, state)
+    if ctx.combat.flee_urgency_active:
+        return urgency if urgency >= FLEE_URGENCY_EXIT else 0.0
+    return urgency if urgency >= FLEE_URGENCY_ENTER else 0.0
 
 
 def _in_combat_dot_suppresses_rest(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState) -> bool:

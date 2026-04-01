@@ -1,3 +1,8 @@
 """Cross-cutting primitives: types, constants, exceptions, features, timing."""
 
-__version__ = "goap"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("compass")
+except PackageNotFoundError:
+    __version__ = "dev"

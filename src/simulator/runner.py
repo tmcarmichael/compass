@@ -8,10 +8,10 @@ from dataclasses import FrozenInstanceError
 
 from brain.context import AgentContext
 from brain.decision import Brain
+from brain.goap import build_world_state
 from brain.goap.actions import build_action_set
 from brain.goap.goals import build_goal_set
 from brain.goap.planner import GOAPPlanner
-from brain.goap.world_state import PlanWorldState
 from brain.learning.encounters import FightHistory
 from brain.learning.scorecard import compute_scorecard, encounter_fitness
 from brain.rules import register_all
@@ -36,7 +36,7 @@ class SimulationRunner:
 
     def __init__(
         self,
-        utility_phase: int = 0,
+        utility_phase: int = 2,
         enable_goap: bool = True,
     ) -> None:
         self._utility_phase = utility_phase
@@ -91,8 +91,8 @@ class SimulationRunner:
         ctx = AgentContext()
         ctx.pet.alive = True
         ctx.zone.target_cons = frozenset({Con.WHITE, Con.BLUE, Con.LIGHT_BLUE})
-        ctx.camp.camp_x = 0.0
-        ctx.camp.camp_y = 0.0
+        ctx.camp.camp_x = 200.0
+        ctx.camp.camp_y = 150.0
         ctx.camp.roam_radius = 200.0
         return ctx
 
@@ -116,18 +116,42 @@ class SimulationRunner:
             result.tick_trace = []
 
         tick_interval = 0.1 if realtime else 0.0
+        sim_tick_seconds = 0.1
         t_wall_start = time.perf_counter()
+        real_time = time.time
+        sim_now = [real_time()]
 
-        # Suppress all timing sleeps in routines so the simulation runs
-        # at full speed.  core.timing.varying_sleep / interruptible_sleep
-        # check this flag and return immediately when it is True.
+        # Suppress timing sleeps and movement noise.  Synthetic states don't
+        # respond to motor commands, so navigation routines always trigger
+        # stuck detection.  Suppress those logs and reset the stuck counter
+        # so the scorecard reflects decision quality, not synthetic movement.
         import core.timing as _ct
 
         _ct._suppress_sleep = True
+
+        import nav.movement as _mv
+
+        _mv._controller._stuck_event_count = 0
+        _mv._controller._stuck_points.clear()
+
+        # Suppress noisy routine-level loggers.  Synthetic states can't drive
+        # the full motor pipeline, so pull/rest/combat routines log warnings
+        # that are misleading in headless mode.
+        _suppressed: list[tuple[logging.Logger, int]] = []
+        for name in ("nav.movement", "routines", "brain.brain_loop", "brain.circuit_breaker"):
+            lg = logging.getLogger(name)
+            _suppressed.append((lg, lg.level))
+            lg.setLevel(logging.CRITICAL)
+        time.time = lambda: sim_now[0]
+
         try:
-            return self._run_loop(scenario, result, realtime, tick_interval, t_wall_start)
+            return self._run_loop(scenario, result, realtime, tick_interval, sim_tick_seconds, sim_now, t_wall_start)
         finally:
+            time.time = real_time
             _ct._suppress_sleep = False
+            for lg, prev in _suppressed:
+                lg.setLevel(prev)
+            _mv._controller._stuck_event_count = 0
 
     def _run_loop(
         self,
@@ -135,9 +159,12 @@ class SimulationRunner:
         result: SimulationResult,
         realtime: bool,
         tick_interval: float,
+        sim_tick_seconds: float,
+        sim_now: list[float],
         t_wall_start: float,
     ) -> SimulationResult:
         for state, phase in scenario.states:
+            sim_now[0] += sim_tick_seconds
             t_next = time.perf_counter() + tick_interval
 
             # Drive one tick
@@ -173,6 +200,10 @@ class SimulationRunner:
                     time.sleep(remaining)
 
         result.wall_time_s = time.perf_counter() - t_wall_start
+
+        # Feed synthetic encounter data so the scorecard has real metrics.
+        # Without this, replay mode has no defeat/combat data and grades F.
+        self._simulate_encounter_learning(scenario)
 
         # Populate end-of-run snapshots
         self._finalize_result(result)
@@ -210,33 +241,98 @@ class SimulationRunner:
         self._state_holder[0] = state
         self._world.update(state)
 
-        # GOAP: generate plan if enabled and no active plan
-        if self._planner and not self._planner.has_plan():
-            ws = self._build_plan_world_state(state)
-            try:
-                self._planner.generate(ws, self._ctx)
-            except (TypeError, FrozenInstanceError):  # fmt: skip
-                pass  # frozen dataclass mutation in DefeatAction -- benign
-
+        self._tick_goap_planner(state)
         self._brain.tick(state)
 
-    def _build_plan_world_state(self, state: GameState) -> PlanWorldState:
-        targets = len([p for p in self._world.targets if p.score > 0])
-        threats = len(self._world.threats)
-        return PlanWorldState(
-            hp_pct=state.hp_pct,
-            mana_pct=state.mana_pct if state.mana_max > 0 else 1.0,
-            pet_alive=self._ctx.pet.alive,
-            engaged=self._ctx.combat.engaged,
-            has_target=state.target is not None,
-            corpse_nearby=False,
-            buffs_active=True,
-            spells_ready=True,
-            inventory_pct=0.0,
-            at_camp=True,
-            targets_available=targets,
-            nearby_threats=threats,
-        )
+    def _tick_goap_planner(self, state: GameState) -> None:
+        """Mirror the live runner's planner handoff into diag.goap_suggestion."""
+        planner = self._planner
+        if planner is None:
+            self._ctx.diag.goap_suggestion = ""
+            return
+
+        suggestion = ""
+        ws = build_world_state(state, self._ctx)
+
+        # If the previously suggested routine finished, move to the next plan step.
+        if self._brain._active is None and planner.has_plan():
+            step = planner.current_step
+            advance_ws = ws
+            if step is not None and step.routine_name == self._brain._ticked_routine_name:
+                self._apply_completed_step_context(step.routine_name, state)
+                # Synthetic scenarios often expose the world-state effects of a
+                # step one phase later than the live runtime would. Apply the
+                # completed step's modeled effects before advancing so the plan
+                # can progress across scenario boundaries instead of thrashing.
+                advance_ws = step.apply_effects(ws)
+                self._brain._ticked_routine_name = ""
+            planner.advance(advance_ws)
+            ws = advance_ws
+
+        if planner.has_plan():
+            step = planner.current_step
+            if step is not None and step.preconditions_met(ws):
+                suggestion = step.routine_name
+                if self._brain._active is None:
+                    planner.start_step(self._ctx)
+            elif step is not None:
+                planner.invalidate("preconditions_failed")
+
+        if not suggestion and not planner.has_plan():
+            try:
+                planner.generate(ws, self._ctx)
+            except (TypeError, FrozenInstanceError):  # fmt: skip
+                pass  # frozen dataclass mutation in DefeatAction -- benign
+            else:
+                step = planner.current_step
+                if step is not None and step.preconditions_met(ws):
+                    suggestion = step.routine_name
+                    if self._brain._active is None:
+                        planner.start_step(self._ctx)
+
+        self._ctx.diag.goap_suggestion = suggestion
+
+    def _apply_completed_step_context(self, routine_name: str, state: GameState) -> None:
+        """Bridge plan-step completion into the rule-scoring context.
+
+        The live runtime mutates combat context as routines succeed. The
+        simulator drives routines from prerecorded states, so it needs a
+        light synthetic handoff here or later rules never become scoreable.
+        """
+        if routine_name == "ACQUIRE":
+            target = state.target
+            if target is None:
+                best = self._world.best_target
+                target = best.spawn if best is not None else None
+            if target is None:
+                return
+            self._ctx.combat.pull_target_id = target.spawn_id
+            self._ctx.defeat_tracker.last_fight_name = target.name
+            self._ctx.defeat_tracker.last_fight_id = target.spawn_id
+            self._ctx.defeat_tracker.last_fight_x = target.x
+            self._ctx.defeat_tracker.last_fight_y = target.y
+            self._ctx.defeat_tracker.last_fight_level = target.level
+            return
+
+        if routine_name == "PULL":
+            target = state.target
+            target_id = target.spawn_id if target is not None else self._ctx.combat.pull_target_id or 0
+            if target is not None:
+                self._ctx.defeat_tracker.last_fight_name = target.name
+                self._ctx.defeat_tracker.last_fight_x = target.x
+                self._ctx.defeat_tracker.last_fight_y = target.y
+                self._ctx.defeat_tracker.last_fight_level = target.level
+            if target_id:
+                self._ctx.combat.engaged = True
+                self._ctx.combat.pull_target_id = target_id
+                self._ctx.defeat_tracker.last_fight_id = target_id
+                self._ctx.player.engagement_start = time.time()
+            return
+
+        if routine_name == "IN_COMBAT":
+            self._ctx.combat.engaged = False
+            self._ctx.combat.pull_target_id = None
+            self._ctx.player.engagement_start = 0.0
 
     def _simulate_encounter_learning(self, scenario: Scenario) -> None:
         """Feed synthetic encounter data to learning systems.

@@ -82,6 +82,8 @@ class GainXPGoal(Goal):
     """Defeat NPCs to accumulate experience."""
 
     def satisfaction(self, ws: PlanWorldState) -> float:
+        if ws.corpse_nearby:
+            return 0.85  # recent defeat completed the grind cycle
         # Always partially unsatisfied (always want more XP)
         # Satisfaction increases when targets are available and resources permit
         if ws.targets_available == 0:

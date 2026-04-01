@@ -1081,6 +1081,21 @@ class TestScoreFlee:
         score = _score_flee(state, ctx)
         assert score > 0.0
 
+    def test_subthreshold_urgency_returns_zero(self) -> None:
+        state = make_game_state(hp_current=990, hp_max=1000)
+        ctx = AgentContext()
+        ctx.pet.alive = True
+
+        assert _score_flee(state, ctx) == 0.0
+
+    def test_safety_floor_returns_full_score(self) -> None:
+        attacker = make_spawn(target_name="TestPlayer", x=10.0, y=0.0)
+        state = make_game_state(spawns=(attacker,))
+        ctx = AgentContext()
+        ctx.pet.alive = False
+
+        assert _score_flee(state, ctx) == 1.0
+
 
 # ---------------------------------------------------------------------------
 # _score_rest

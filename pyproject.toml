@@ -1,6 +1,6 @@
 [project]
 name = "compass"
-version = "0"
+version = "0.1.0"
 description = "Autonomous agent architecture for complex 3D environments"
 requires-python = ">= 3.14"
 dependencies = []  # stdlib only -- zero runtime deps by design
@@ -10,7 +10,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+only-include = ["src"]
+sources = ["src"]
 
 # ── Dev dependencies (install: uv sync) ──────────────────────────────
 
