@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
+from simulator.results import SimulationResult
 from simulator.runner import SimulationRunner
 from simulator.scenarios import Scenario
 
@@ -45,13 +47,11 @@ def _load_scenario(name: str) -> Scenario:
     return Scenario.from_json(name)
 
 
-def _run_converge(runner: SimulationRunner, scenario: Scenario, sessions: int, quiet: bool) -> str:
-    """Run convergence mode and format output."""
-    results = runner.run_convergence(scenario, sessions=sessions)
-
+def _format_converge(results: list[SimulationResult], scenario_name: str, sessions: int) -> str:
+    """Format already-computed convergence results for terminal output."""
     lines = [
         "",
-        f"Convergence: {scenario.name} x {sessions} sessions",
+        f"Convergence: {scenario_name} x {sessions} sessions",
         "",
         f"{'Session':>8}  {'Grade':>5}  {'Ticks':>6}  {'p99 ms':>7}  "
         f"{'Fights':>6}  {'Avg Dur':>8}  {'Drift':>6}  {'GOAP %':>6}",
@@ -103,6 +103,8 @@ def main() -> None:
     )
 
     header = f"Compass Headless Simulator - {args.mode} mode"
+    result: SimulationResult | None = None
+    converge_results: list[SimulationResult] | None = None
 
     if args.mode == "benchmark":
         if not args.quiet:
@@ -114,13 +116,10 @@ def main() -> None:
             print(result.summary())
 
     elif args.mode == "converge":
+        converge_results = runner.run_convergence(scenario, sessions=args.sessions)
         if not args.quiet:
             print(header)
-        output = _run_converge(runner, scenario, args.sessions, args.quiet)
-        if not args.quiet:
-            print(output)
-        # For JSON output, serialize the last session's result
-        result = runner.run(scenario)  # final snapshot
+            print(_format_converge(converge_results, scenario.name, args.sessions))
 
     else:  # replay
         if not args.quiet:
@@ -132,15 +131,11 @@ def main() -> None:
 
     # JSON export
     if args.output:
-        if args.mode == "converge":
-            # Re-run to get clean result for export
-            import json
-
-            results = runner.run_convergence(scenario, sessions=args.sessions)
-            data = [r.to_dict() for r in results]
+        if converge_results is not None:
+            data = [r.to_dict() for r in converge_results]
             with open(args.output, "w") as f:
                 json.dump(data, f, indent=2)
-        else:
+        elif result is not None:
             with open(args.output, "w") as f:
                 f.write(result.to_json())
         if not args.quiet:

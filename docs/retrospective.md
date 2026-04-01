@@ -62,18 +62,7 @@ This architecture was developed and validated against Classic EverQuest: a persi
 
 ## Architecture Evolution
 
-| Stage                | Milestone                                                |
-| -------------------- | -------------------------------------------------------- |
-| Monolith             | Main loop with if/else chains                            |
-| Pipeline             | Extraction into perception / brain / routines / motor    |
-| Priority rules       | Priority rule engine, routine state machines             |
-| Observability        | 4-tier logging, structured JSONL events                  |
-| Persistent learning  | Spatial memory, encounter history, scorecard auto-tuning |
-| Utility scoring      | Utility scoring with phase-gated selection               |
-| Learning loops       | Finite-difference weight tuning, Thompson Sampling, threshold tuning |
-| GOAP                 | Goal planner with Monte Carlo evaluation, spawn prediction         |
-
-The architecture has been [additive since the pipeline](evolution.md#the-invariant-each-stage-is-additive). Nothing was replaced. Everything composes.
+The architecture progressed through six stages, each solving a specific failure mode of the previous one: monolith, pipeline, priority rules, utility scoring, learning loops, and GOAP. See [Evolution](evolution.md) for the full stage-by-stage history. The architecture has been [additive since the pipeline](evolution.md#the-invariant-each-stage-is-additive). Nothing was replaced. Everything composes.
 
 ---
 

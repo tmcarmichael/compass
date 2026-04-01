@@ -112,6 +112,13 @@ class SimulationRunner:
             trace: If True, record per-tick detail in result.
         """
         result = SimulationResult(scenario_name=scenario.name)
+        result.simulator_assumptions.update(
+            {
+                "headless_scenario": True,
+                "movement_stuck_suppressed": True,
+                "synthetic_step_handoff": True,
+            }
+        )
         if trace:
             result.tick_trace = []
 
@@ -203,7 +210,7 @@ class SimulationRunner:
 
         # Feed synthetic encounter data so the scorecard has real metrics.
         # Without this, replay mode has no defeat/combat data and grades F.
-        self._simulate_encounter_learning(scenario)
+        self._simulate_encounter_learning(scenario, result)
 
         # Populate end-of-run snapshots
         self._finalize_result(result)
@@ -224,12 +231,6 @@ class SimulationRunner:
             self._reset_session()
             result = self.run(scenario)
             result.scenario_name = f"{scenario.name} (session {i + 1}/{sessions})"
-
-            # Simulate encounter learning from combat phases
-            self._simulate_encounter_learning(scenario)
-
-            # Re-snapshot after learning
-            self._finalize_result(result)
             results.append(result)
 
         return results
@@ -334,7 +335,7 @@ class SimulationRunner:
             self._ctx.combat.pull_target_id = None
             self._ctx.player.engagement_start = 0.0
 
-    def _simulate_encounter_learning(self, scenario: Scenario) -> None:
+    def _simulate_encounter_learning(self, scenario: Scenario, result: SimulationResult) -> None:
         """Feed synthetic encounter data to learning systems.
 
         Simulates what BrainRunner.tick_handlers would do after combat.
@@ -345,6 +346,9 @@ class SimulationRunner:
         combat_ticks = sum(1 for _, phase in scenario.states if phase == "combat")
         if combat_ticks == 0:
             return
+
+        result.simulator_assumptions["synthetic_encounter_learning"] = True
+        result.simulator_assumptions["synthetic_scorecard_inputs"] = True
 
         # Approximate: each ~60 combat ticks is one encounter
         encounters = max(1, combat_ticks // 60)

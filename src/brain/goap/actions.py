@@ -223,7 +223,7 @@ class WanderAction(PlanAction):
 
 
 def build_action_set() -> list[PlanAction]:
-    """Build the standard set of 11 actions for GOAP planning."""
+    """Build the standard set of 8 actions for GOAP planning."""
     return [
         RestAction(name="rest", routine_name="REST"),
         AcquireAction(name="acquire", routine_name="ACQUIRE"),

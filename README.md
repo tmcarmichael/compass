@@ -18,6 +18,41 @@ The architecture evolved in a legacy 3D MMORPG sandbox. It progressed from a mon
 
 > **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output, or [`docs/walkthrough.md`](docs/walkthrough.md) for a step-by-step trace of one tick from perception to motor output.
 
+## Reading the Code
+
+Start with any rule module in [`brain/rules/`](src/brain/rules/) to see how conditions and score functions are written. Then inspect [`brain/goap/planner.py`](src/brain/goap/planner.py) for A\* search with Monte Carlo robustness gating, [`brain/learning/encounters.py`](src/brain/learning/encounters.py) for Bayesian posteriors and Thompson Sampling, [`brain/world/model.py`](src/brain/world/model.py) for derived world intelligence, and [`brain/runner/loop.py`](src/brain/runner/loop.py) for the 10 Hz execution path.
+
+For a step-by-step trace of one tick from perception to motor output, see [`docs/walkthrough.md`](docs/walkthrough.md). For architecture details beyond the README, see [`docs/architecture.md`](docs/architecture.md). For design rationale, [`docs/design-decisions.md`](docs/design-decisions.md). For the full evolutionary arc, [`docs/evolution.md`](docs/evolution.md).
+
+<details>
+<summary><strong>Project Structure</strong></summary>
+
+```
+src/
+  core/                  Cross-cutting primitives (types, constants, exceptions, features)
+  runtime/               Agent wiring and session lifecycle
+  perception/            Environment state reading (snapshot contract, pointer traversal)
+  brain/                 Decision stack: priority rules, utility scoring, GOAP planner
+  brain/state/           Typed sub-state dataclasses (combat, pet, camp, inventory, ...)
+  brain/runner/          10 Hz tick loop, lifecycle management, level-up handling
+  brain/world/           World model, entity tracking, anomaly detection
+  brain/goap/            GOAP planner, world state, actions, goals, spawn predictor
+  brain/learning/        Encounter history, spatial memory, scorecard, weight gradient
+  brain/scoring/         Target scoring, utility curves, weight learner
+  brain/rules/           Priority rules across 4 modules (survival, combat, maintenance, nav)
+  routines/              State machine behaviors (enter/tick/exit)
+  routines/strategies/   Swappable combat strategy implementations
+  nav/                   JPS/A* pathfinding, DDA line-of-sight, waypoint graphs, zone graph
+  nav/terrain/           1-unit heightmaps from zone geometry, obstacle detection
+  motor/                 Action interface (movement, targeting, casting, stance)
+  eq/                    Environment data parsers (geometry, spells, zone models)
+  simulator/             Offline scenario runner for testing decisions without live environment
+  util/                  Structured logging, event schemas, forensics, invariant checking
+docs/                    Architecture, design decisions, evolution history, retrospective
+```
+
+</details>
+
 ---
 
 ## Architecture
@@ -89,7 +124,7 @@ flowchart TB
 
 No module imports upward. The dependency graph is a DAG, and each layer is independently understandable.
 
-The **brain thread** runs at 10 Hz: read state, evaluate the decision stack, tick the active routine, issue motor commands. A single cycle runs in well under 100ms. A secondary thread handles observability output and runtime control signals. Thread safety between them comes from immutable perception snapshots: frozen `GameState` dataclasses produced each tick, never modified after creation. No locks, no races.
+The **brain thread** runs at 10 Hz: read state, evaluate the decision stack, tick the active routine, issue motor commands. A single cycle completes in well under 100ms (p99: 0.5ms in headless simulation). A secondary thread handles observability output and runtime control signals. Thread safety between them comes from immutable perception snapshots: frozen `GameState` dataclasses produced each tick, never modified after creation. No locks, no races.
 
 ### Perception
 
@@ -103,7 +138,7 @@ The brain runs a three-layer decision stack. Each layer adds capability; the lay
 
 **Utility scoring** operates within the safety envelope. Non-emergency rules produce float scores reflecting "how valuable is this action right now?" Five selection phases are configurable at runtime: Phase 0 ignores scores (conservative baseline), Phase 1 logs divergences without changing behavior (observation mode), Phase 2 uses scores within priority tiers, Phase 3 uses weighted cross-tier comparison, Phase 4 uses declarative consideration-based scoring with weighted geometric mean. This escalation path allows the scoring system to be validated before it influences decisions.
 
-**GOAP planning** generates multi-step action sequences toward explicit goals: survive, gain XP, manage resources. The planner uses A\* on the goal state space, not the terrain, with preconditions, effects, and learned cost functions per action. Plans run 3–8 steps and are generated once per routine completion or on plan invalidation (budget: <50ms). Candidate plans are evaluated via Monte Carlo rollouts: action effects are sampled stochastically from learned posterior distributions to estimate expected plan value under uncertainty, so a plan that performs well across noisy outcomes is preferred over one that looks optimal only under point estimates. The relationship to the priority system is explicit: GOAP proposes, priorities dispose. Each tick, the current plan step's routine receives a score boost in the utility selection phase; emergency rules evaluate first and invalidate the plan if any fires. Spawn prediction (Poisson process from defeat timestamps) feeds both the planner's positioning decisions and the wander routine's directional bias.
+**GOAP planning** generates multi-step action sequences toward explicit goals: survive, gain XP, manage resources. The planner uses A\* on the goal state space with learned cost functions per action, producing 3–8 step plans within a 50ms budget. Candidate plans pass a Monte Carlo robustness gate: action effects are sampled stochastically from learned posterior distributions, and plans that fail under noisy outcomes are rejected. The relationship to the priority system is explicit: GOAP proposes, priorities dispose. Emergency rules evaluate first each tick and invalidate the active plan if any fires. See [`docs/architecture.md`](docs/architecture.md#goap-planner) and [`docs/samples/goap-planner.md`](docs/samples/goap-planner.md) for the full planning pipeline.
 
 ### Routines
 
@@ -212,16 +247,16 @@ Each session produces 6 output files: 4 log files (one per tier threshold), a st
 
 All samples in [docs/samples/](docs/samples/) are real output from live sessions, not hand-written examples:
 
-| Sample                                                           | What it shows                                                                                                        |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| [Session tiers](docs/samples/session-tiers.md)                   | One session viewed through all 4 log tiers: EVENT arc, INFO routine flow, VERBOSE rule cascade, DEBUG motor commands |
-| [Decision trace](docs/samples/decision-trace.md)                 | 18 decision receipts showing WANDER → ACQUIRE → PULL (locked) → IN_COMBAT with tick timing and rule evaluation       |
-| [GOAP plan](docs/samples/goap-planner.md)                        | Plan generation, step-by-step cost accuracy (estimated vs actual), and plan completion                               |
-| [Forensics buffer](docs/samples/forensics-ring-buffer.md)        | 300-tick ring buffer dump: skeleton aggro interrupts spell memorization, FLEE fires within one tick                  |
-| [Learned encounter data](docs/samples/learned-encounter-data.md) | Cross-session improvement: grade B → A, fight duration 29.5s → 15.9s, auto-tuned parameters drifting from defaults   |
-| [Fight event](docs/samples/structured-fight-event.md)            | Structured `fight_end` event with all 20 fields and embedded world snapshot                                          |
-| [Convergence](docs/samples/convergence.md)                       | 10-session headless run: fight duration drops 53% as encounter history accumulates and cost functions self-correct   |
-| [Ablation results](docs/samples/ablation-results.md)             | Learning vs. defaults: 97% GOAP cost error reduction, 25x danger discrimination, weight tuning stability             |
+| Sample | What it shows |
+| --- | --- |
+| [Session tiers](docs/samples/session-tiers.md) | One session through all 4 log tiers |
+| [Decision trace](docs/samples/decision-trace.md) | 18 receipts across a WANDER → ACQUIRE → PULL → IN_COMBAT transition |
+| [GOAP plan](docs/samples/goap-planner.md) | Goal evaluation, A\* search, MC robustness gate, cost self-correction |
+| [Forensics buffer](docs/samples/forensics-ring-buffer.md) | 300-tick ring buffer dump after skeleton aggro interrupts memorization |
+| [Learned encounter data](docs/samples/learned-encounter-data.md) | Cross-session improvement: grade B → A, fight duration 29.5s → 15.9s |
+| [Fight event](docs/samples/structured-fight-event.md) | Structured `fight_end` event with all 20 fields |
+| [Convergence](docs/samples/convergence.md) | 10-session run: 53% fight duration reduction as posteriors tighten |
+| [Ablation results](docs/samples/ablation-results.md) | Learning vs. defaults: cost error, danger discrimination, weight stability |
 
 ---
 
@@ -250,44 +285,14 @@ Convergence mode preserves learning state across sessions. Fight duration drops 
 
 See [docs/samples/convergence.md](docs/samples/convergence.md) for the full output and explanation.
 
----
+Tick timing across scenarios:
 
-## Reading the Code
+| | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| camp_session (1 280 ticks) | 0.1 ms | 0.1 ms | 0.5 ms | 0.7 ms |
+| survival_stress (220 ticks) | 0.1 ms | 0.2 ms | 0.3 ms | 0.3 ms |
 
-After the top-level overview, read by subsystem. Start with any rule module in [`brain/rules/`](src/brain/rules/) to see how conditions and score functions are written. Then inspect [`brain/goap/planner.py`](src/brain/goap/planner.py) for goal-directed sequencing, [`brain/world/model.py`](src/brain/world/model.py) for derived world intelligence, and [`brain/runner/loop.py`](src/brain/runner/loop.py) for the 10 Hz execution path. Combat strategies live in [`routines/strategies/`](src/routines/strategies/).
-
-For a step-by-step trace of one tick from perception to motor output, see [`docs/walkthrough.md`](docs/walkthrough.md). For architecture details beyond the README, see [`docs/architecture.md`](docs/architecture.md). For design rationale, [`docs/design-decisions.md`](docs/design-decisions.md). For the full evolutionary arc, [`docs/evolution.md`](docs/evolution.md).
-
-<details>
-<summary><strong>Project Structure</strong></summary>
-
-```
-src/
-  core/                  Cross-cutting primitives (types, constants, exceptions, features)
-  runtime/               Agent wiring and session lifecycle
-  perception/            Environment state reading (snapshot contract, pointer traversal)
-  brain/                 Decision stack: priority rules, utility scoring, GOAP planner
-  brain/state/           Typed sub-state dataclasses (combat, pet, camp, inventory, ...)
-  brain/runner/          10 Hz tick loop, lifecycle management, level-up handling
-  brain/world/           World model, entity tracking, anomaly detection
-  brain/goap/            GOAP planner, world state, actions, goals, spawn predictor
-  brain/learning/        Encounter history, spatial memory, scorecard, weight gradient
-  brain/scoring/         Target scoring, utility curves, weight learner
-  brain/rules/           Priority rules across 4 modules (survival, combat, maintenance, nav)
-  routines/              State machine behaviors (enter/tick/exit)
-  routines/strategies/   Swappable combat strategy implementations
-  nav/                   JPS/A* pathfinding, DDA line-of-sight, waypoint graphs, zone graph
-  nav/terrain/           1-unit heightmaps from zone geometry, obstacle detection
-  motor/                 Action interface (movement, targeting, casting, stance)
-  eq/                    Environment data parsers (geometry, spells, zone models)
-  simulator/             Offline scenario runner for testing decisions without live environment
-  util/                  Structured logging, event schemas, forensics, invariant checking
-docs/                    Architecture, design decisions, evolution history, retrospective
-```
-
-</details>
-
-Built with Python 3.14, zero runtime dependencies, and the standard library. See [docs/testing.md](docs/testing.md) for the test strategy and coverage philosophy.
+See [docs/testing.md](docs/testing.md) for the test strategy and coverage philosophy.
 
 ---
 

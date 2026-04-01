@@ -33,6 +33,9 @@ class SimulationResult:
     weight_drift: dict[str, float] = field(default_factory=dict)
     scorecard: dict[str, int | float | str] = field(default_factory=dict)
 
+    # Explicit simulator modeling assumptions / synthetic inputs
+    simulator_assumptions: dict[str, bool] = field(default_factory=dict)
+
     # Optional per-tick trace
     tick_trace: list[dict] | None = None
 
@@ -133,6 +136,7 @@ class SimulationResult:
                 "weight_drift": {k: round(v, 4) for k, v in self.weight_drift.items()},
                 "scorecard": self.scorecard,
             },
+            "simulator_assumptions": self.simulator_assumptions,
         }
         if self.tick_trace is not None:
             d["tick_trace"] = self.tick_trace
@@ -179,6 +183,10 @@ class SimulationResult:
             grade = self.scorecard.get("grade", "?")
             overall = self.scorecard.get("overall", 0)
             lines.extend(["", f"Scorecard: {grade} ({overall}/100)"])
+
+        assumptions = [name for name, enabled in sorted(self.simulator_assumptions.items()) if enabled]
+        if assumptions:
+            lines.extend(["", "Simulator Notes", f"  Synthetic/modeling inputs: {', '.join(assumptions)}"])
 
         budget_ok = self.ticks_over_100ms == 0
         lines.extend(

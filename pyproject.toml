@@ -67,7 +67,20 @@ ignore = [
 max-complexity = 15
 
 [tool.ruff.lint.isort]
-known-first-party = ["src"]
+known-first-party = [
+    "brain",
+    "compass",
+    "core",
+    "eq",
+    "motor",
+    "nav",
+    "perception",
+    "routines",
+    "runtime",
+    "simulator",
+    "tests",
+    "util",
+]
 
 [tool.ruff.format]
 quote-style = "double"

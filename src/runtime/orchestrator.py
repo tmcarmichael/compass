@@ -23,57 +23,23 @@ from runtime.agent import (
     find_config,
     load_zone_config,
 )
+from runtime.session_logging import (
+    LogCaptureHandler,
+    SessionLoggingHandles,
+    prune_session_logs,
+    setup_session_logging,
+)
 
 if TYPE_CHECKING:
-    from logging.handlers import QueueListener
-
     from brain.context import AgentContext
     from brain.decision import Brain
     from eq.spells import SpellDB
     from nav.waypoint_graph import WaypointGraph
     from nav.zone_graph import ZoneGraph
-    from util.structured_log import StructuredHandler
 
 log = logging.getLogger(__name__)
 
-
-def _prune_session_logs(session_dir: Path, max_age_days: int = 7, keep_min: int = 5) -> None:
-    """Delete old _events.jsonl and _decisions.jsonl files.
-
-    Keeps .log and _report.json (small, useful for long-term reference).
-    Always keeps at least keep_min most recent sessions regardless of age.
-    """
-    now = time.time()
-    max_age = max_age_days * 86400
-    pruned = 0
-    for suffix in ("_events.jsonl", "_decisions.jsonl"):
-        files = sorted(session_dir.glob(f"*{suffix}"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for f in files[keep_min:]:
-            try:
-                if now - f.stat().st_mtime > max_age:
-                    f.unlink()
-                    pruned += 1
-            except OSError:
-                pass
-    if pruned:
-        log.info("[LIFECYCLE] Pruned %d old session JSONL files", pruned)
-
-
-class _LogCapture(logging.Handler):
-    """Routes log records to orchestrator's log ring buffer."""
-
-    def __init__(self, orchestrator: AgentOrchestrator) -> None:
-        super().__init__(level=logging.INFO)
-        self._orch = orchestrator
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            self._orch.add_log(msg, record.levelname)
-        except (ValueError, AttributeError, OSError) as exc:
-            import sys
-
-            print(f"LogCapture.emit failed: {exc}", file=sys.stderr)
+_prune_session_logs = prune_session_logs
 
 
 class AgentOrchestrator:
@@ -110,12 +76,8 @@ class AgentOrchestrator:
         self._log_index = 0
 
         # Logging handlers
-        self._log_handler: _LogCapture | None = None
-        self._session_handler: logging.Handler | None = None
-        self._structured_handler: StructuredHandler | None = None
-        self._decision_handler: logging.Handler | None = None
-        self._decision_throttle: object | None = None
-        self._log_queue_listener: QueueListener | None = None
+        self._log_handler: LogCaptureHandler | None = None
+        self._session_logging: SessionLoggingHandles | None = None
 
         # Travel
         self._zone_graph: ZoneGraph | None = None
@@ -177,7 +139,7 @@ class AgentOrchestrator:
             log.warning("[LIFECYCLE] SpellDB not loaded: %s", e)
 
         # Install log capture
-        self._log_handler = _LogCapture(self)
+        self._log_handler = LogCaptureHandler(self.add_log)
         logging.getLogger("compass").addHandler(self._log_handler)
 
         self.add_log(f"Connected: {self._char_name} in {self.zone_display}")
@@ -458,121 +420,7 @@ class AgentOrchestrator:
         session_dir.mkdir(parents=True, exist_ok=True)
         _prune_session_logs(session_dir)
         session_id = f"session_{time.strftime('%Y%m%d_%H%M%S')}"
-
-        # Elapsed time filter -- injects +Xs into tagged text log lines
-        # for cross-referencing with _events.jsonl elapsed field
-        import queue
-        from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
-
-        from util.log_tiers import EVENT, VERBOSE
-        from util.structured_log import (
-            DecisionThrottle,
-            ElapsedFilter,
-            StructuredHandler,
-            reset_throttle_state,
-        )
-
-        _fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        _session_start = time.time()
-        self._elapsed_filter = ElapsedFilter(start_time=_session_start)
-        reset_throttle_state()  # clear cross-session bleed from crash restart
-
-        # events_text_handler -- EVENT (25) + WARNING + ERROR only
-        # Readable narrative of significant moments; very small file.
-        _events_text_file = session_dir / f"{session_id}_events.log"
-        _events_text_handler = RotatingFileHandler(str(_events_text_file), maxBytes=10_000_000, backupCount=2)
-        _events_text_handler.setLevel(EVENT)
-        _events_text_handler.setFormatter(_fmt)
-        _events_text_handler.addFilter(self._elapsed_filter)
-
-        # session_handler -- INFO (20) + EVENT; no VERBOSE/DEBUG
-        # "What happened" operational log -- routine enter/exit, targets, movement.
-        session_file = session_dir / f"{session_id}.log"
-        _session_file_handler = RotatingFileHandler(str(session_file), maxBytes=50_000_000, backupCount=3)
-        _session_file_handler.setLevel(logging.INFO)
-        _session_file_handler.setFormatter(_fmt)
-        _session_file_handler.addFilter(self._elapsed_filter)
-
-        # verbose_handler -- VERBOSE (15) + INFO + EVENT; no DEBUG
-        # "Why it decided" log -- decision branches, scoring, target rejection.
-        _verbose_file = session_dir / f"{session_id}_verbose.log"
-        _verbose_handler = RotatingFileHandler(str(_verbose_file), maxBytes=50_000_000, backupCount=3)
-        _verbose_handler.setLevel(VERBOSE)
-        _verbose_handler.setFormatter(_fmt)
-        _verbose_handler.addFilter(self._elapsed_filter)
-
-        # debug_handler -- DEBUG (10); captures everything
-        _debug_file = session_dir / f"{session_id}_debug.log"
-        _debug_handler = RotatingFileHandler(str(_debug_file), maxBytes=50_000_000, backupCount=3)
-        _debug_handler.setLevel(logging.DEBUG)
-        _debug_handler.setFormatter(_fmt)
-        _debug_handler.addFilter(self._elapsed_filter)
-
-        # Wire all four real handlers through a QueueListener so file I/O
-        # runs in the listener thread -- zero blocking on the brain thread.
-        _log_queue: queue.Queue[logging.LogRecord] = queue.Queue(-1)
-        _queue_handler = QueueHandler(_log_queue)
-        # Queue handler passes records at whatever level the root sends;
-        # each downstream handler enforces its own level threshold.
-        _queue_handler.setLevel(logging.DEBUG)
-        _listener = QueueListener(
-            _log_queue,
-            _events_text_handler,
-            _session_file_handler,
-            _verbose_handler,
-            _debug_handler,
-            respect_handler_level=True,
-        )
-        _listener.start()
-        self._log_queue_listener = _listener
-
-        # Attach queue handler to compass logger; real handlers run in listener thread.
-        logging.getLogger("compass").addHandler(_queue_handler)
-        # Keep a reference so _run_brain finally block can remove it cleanly.
-        self._session_handler = _queue_handler
-        events_file = session_dir / f"{session_id}_events.jsonl"
-        self._structured_handler = StructuredHandler(events_file, session_id)
-        logging.getLogger("compass").addHandler(self._structured_handler)
-        ctx.diag.structured_handler = self._structured_handler
-
-        # Decision receipt handler -- separate JSONL file, dedicated logger
-        decisions_file = session_dir / f"{session_id}_decisions.jsonl"
-        self._decision_handler = StructuredHandler(decisions_file, session_id)
-        decision_logger = logging.getLogger("compass.decisions")
-        decision_logger.addHandler(self._decision_handler)
-        decision_logger.setLevel(logging.DEBUG)
-        # Don't propagate to parent (decisions stay out of events.jsonl)
-        decision_logger.propagate = False
-        self._decision_throttle = DecisionThrottle(decision_logger, interval=5)
-        ctx.diag.decision_throttle = self._decision_throttle
-
-        # Forensics ring buffer -- 300 ticks (~30s), flush on death/crash
-        from util.forensics import ForensicsBuffer
-
-        self._forensics: ForensicsBuffer | None = ForensicsBuffer(session_id, str(session_dir))
-        ctx.diag.forensics = self._forensics
-
-        # Metrics engine -- percentiles + success rates
-        from util.metrics import MetricsEngine
-
-        self._metrics_engine = MetricsEngine()
-        ctx.diag.metrics = self._metrics_engine
-
-        # Runtime invariants -- checked every N ticks, violations -> events
-        from util.invariants import InvariantChecker, register_builtin_invariants
-
-        self._invariant_checker = InvariantChecker()
-        register_builtin_invariants(self._invariant_checker)
-        ctx.diag.invariants = self._invariant_checker
-
-        # Narrative logging modules (defeat cycles, incidents, phases)
-        from util.cycle_tracker import CycleTracker
-        from util.incident_reporter import IncidentReporter
-        from util.phase_detector import PhaseDetector
-
-        ctx.diag.cycle_tracker = CycleTracker()
-        ctx.diag.incident_reporter = IncidentReporter()
-        ctx.diag.phase_detector = PhaseDetector()
+        self._session_logging = setup_session_logging(ctx, session_dir, session_id)
 
         self.stop_event.clear()
         runner = BrainRunner(
@@ -620,26 +468,13 @@ class AgentOrchestrator:
             with self._agent_lock:
                 self.agent_running = False
             self.add_log("Agent stopped")
-            if hasattr(self, "_forensics") and self._forensics:
-                self._forensics.close()
-                self._forensics = None
-            if hasattr(self, "_decision_handler") and self._decision_handler:
-                dec_logger = logging.getLogger("compass.decisions")
-                dec_logger.removeHandler(self._decision_handler)
-                dec_logger.propagate = True  # restore for clean session restart
-                self._decision_handler.close()
-                self._decision_handler = None
-            if hasattr(self, "_structured_handler") and self._structured_handler:
-                logging.getLogger("compass").removeHandler(self._structured_handler)
-                self._structured_handler.close()
-                self._structured_handler = None
-            if self._session_handler:
-                logging.getLogger("compass").removeHandler(self._session_handler)
-                self._session_handler.close()
-                self._session_handler = None
-            if self._log_queue_listener:
-                self._log_queue_listener.stop()
-                self._log_queue_listener = None
+            if self._session_logging:
+                try:
+                    self._session_logging.close()
+                except Exception:
+                    log.exception("[LIFECYCLE] Session logging teardown failed")
+                finally:
+                    self._session_logging = None
 
     def _on_display_update(self, routine_name: str, defeats: int) -> None:
         with self._agent_lock:

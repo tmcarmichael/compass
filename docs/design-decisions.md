@@ -2,9 +2,7 @@
 
 # Design Decisions
 
-Rationale for major architectural choices and rejected alternatives.
-
-This document records the rationale behind each major architectural choice in Compass. Decisions are grouped by subsystem.
+Rationale for major architectural choices and rejected alternatives, grouped by subsystem.
 
 ---
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 
 from simulator.__main__ import _parse_args
 from simulator.runner import SimulationRunner
@@ -153,3 +154,33 @@ def test_tick_goap_planner_seeds_pull_target_after_acquire_completion() -> None:
     runner._tick_goap_planner(state)
 
     assert runner._ctx.combat.pull_target_id == 777
+
+
+def test_run_marks_synthetic_assumptions_when_post_processing_applies() -> None:
+    runner = SimulationRunner(enable_goap=False)
+    scenario = SimpleNamespace(name="mini", states=[(make_game_state(), "combat")])
+
+    result = runner.run(scenario)
+
+    assert result.simulator_assumptions["headless_scenario"] is True
+    assert result.simulator_assumptions["synthetic_step_handoff"] is True
+    assert result.simulator_assumptions["synthetic_encounter_learning"] is True
+    assert result.simulator_assumptions["synthetic_scorecard_inputs"] is True
+
+
+def test_run_convergence_does_not_double_apply_synthetic_learning(monkeypatch) -> None:
+    runner = SimulationRunner(enable_goap=False)
+    scenario = SimpleNamespace(name="mini", states=[(make_game_state(), "combat")])
+    calls = {"count": 0}
+    original = runner._simulate_encounter_learning
+
+    def _wrapped(scenario_obj, result_obj) -> None:
+        calls["count"] += 1
+        original(scenario_obj, result_obj)
+
+    monkeypatch.setattr(runner, "_simulate_encounter_learning", _wrapped)
+
+    results = runner.run_convergence(scenario, sessions=1)
+
+    assert calls["count"] == 1
+    assert len(results) == 1
