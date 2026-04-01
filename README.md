@@ -4,7 +4,7 @@
 ![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-brightgreen.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![CI](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml/badge.svg)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/tmcarmichael/COVERAGE_GIST_ID/raw/coverage.json)](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/tmcarmichael/69dbcb7758972d25fac04fe38c20482a/raw/coverage.json)](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml)
 
 A layered decision architecture for intelligent behavior in a real-time 3D world.
 
