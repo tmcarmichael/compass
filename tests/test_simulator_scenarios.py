@@ -7,7 +7,6 @@ import json
 from perception.state import GameState
 from simulator.scenarios import Scenario
 
-
 # -- Built-in scenario shape --------------------------------------------------
 
 

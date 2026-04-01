@@ -111,12 +111,16 @@ def setup_session_logging(ctx: AgentContext, session_dir: Path, session_id: str)
     elapsed_filter = ElapsedFilter(start_time=time.time())
     reset_throttle_state()
 
-    events_text_handler = RotatingFileHandler(str(session_dir / f"{session_id}_events.log"), maxBytes=10_000_000, backupCount=2)
+    events_text_handler = RotatingFileHandler(
+        str(session_dir / f"{session_id}_events.log"), maxBytes=10_000_000, backupCount=2
+    )
     events_text_handler.setLevel(EVENT)
     events_text_handler.setFormatter(fmt)
     events_text_handler.addFilter(elapsed_filter)
 
-    session_file_handler = RotatingFileHandler(str(session_dir / f"{session_id}.log"), maxBytes=50_000_000, backupCount=3)
+    session_file_handler = RotatingFileHandler(
+        str(session_dir / f"{session_id}.log"), maxBytes=50_000_000, backupCount=3
+    )
     session_file_handler.setLevel(logging.INFO)
     session_file_handler.setFormatter(fmt)
     session_file_handler.addFilter(elapsed_filter)
@@ -128,7 +132,9 @@ def setup_session_logging(ctx: AgentContext, session_dir: Path, session_id: str)
     verbose_handler.setFormatter(fmt)
     verbose_handler.addFilter(elapsed_filter)
 
-    debug_handler = RotatingFileHandler(str(session_dir / f"{session_id}_debug.log"), maxBytes=50_000_000, backupCount=3)
+    debug_handler = RotatingFileHandler(
+        str(session_dir / f"{session_id}_debug.log"), maxBytes=50_000_000, backupCount=3
+    )
     debug_handler.setLevel(logging.DEBUG)
     debug_handler.setFormatter(fmt)
     debug_handler.addFilter(elapsed_filter)

@@ -152,7 +152,9 @@ class SimulationRunner:
         time.time = lambda: sim_now[0]
 
         try:
-            return self._run_loop(scenario, result, realtime, tick_interval, sim_tick_seconds, sim_now, t_wall_start)
+            return self._run_loop(
+                scenario, result, realtime, tick_interval, sim_tick_seconds, sim_now, t_wall_start
+            )
         finally:
             time.time = real_time
             _ct._suppress_sleep = False
