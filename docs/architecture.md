@@ -273,7 +273,7 @@ Strategy selection uses learned encounter history when available; after 5+ encou
 
 ### Terrain
 
-Zone geometry is parsed from the game client's asset files own 3D asset files. The parsing pipeline extracts walkable surfaces and produces heightmap caches at 1-unit resolution.
+Zone geometry is parsed from the game client's own 3D asset files. The parsing pipeline extracts walkable surfaces and produces heightmap caches at 1-unit resolution.
 
 Each cell in the heightmap stores:
 

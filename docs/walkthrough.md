@@ -6,7 +6,7 @@ What happens in one tick of the 10 Hz brain loop, traced through the actual sour
 
 ## 1. Clock gate
 
-[`brain/runner/loop.py:552`](../src/brain/runner/loop.py) -- The `TickClock` blocks until the next 100ms boundary. When it releases, the tick counter increments and the loop begins.
+[`brain/runner/loop.py:541`](../src/brain/runner/loop.py) -- The `TickClock` blocks until the next 100ms boundary. When it releases, the tick counter increments and the loop begins.
 
 ```
 _clock.wait_for_next_tick()
@@ -16,7 +16,7 @@ The clock measures `dt` (actual elapsed time since last tick). At 10 Hz with no 
 
 ## 2. Perception snapshot
 
-[`brain/runner/loop.py:557-563`](../src/brain/runner/loop.py) -- `_tick_pre_state` calls `reader.read_state(include_spawns=True)`, which traverses the game client's internal pointer chains via `ReadProcessMemory` and returns a frozen `GameState` dataclass. This snapshot is immutable after creation: the brain thread produces it, every subsequent step consumes it, no locks needed.
+[`brain/runner/loop.py:546`](../src/brain/runner/loop.py) -- `_tick_pre_state` calls `reader.read_state(include_spawns=True)`, which traverses the game client's internal pointer chains via `ReadProcessMemory` and returns a frozen `GameState` dataclass. This snapshot is immutable after creation: the brain thread produces it, every subsequent step consumes it, no locks needed.
 
 The `GameState` contains: player position (x, y, z), HP/mana current and max, target info, heading, zone ID, combat flag, sitting flag, and a tuple of `SpawnData` for every visible entity.
 
@@ -24,17 +24,17 @@ If the memory read fails (process not responding, pointer chain broken), the tic
 
 ## 3. World state update
 
-[`brain/runner/loop.py:570`](../src/brain/runner/loop.py) -- `WorldStateUpdater.update_world_state()` refreshes the derived world model: NPC tracking (who appeared, who moved, who despawned), pet status, threat detection (approaching hostile entities), and health monitoring. This runs before rule evaluation so that rules see current-tick derived state.
+[`brain/runner/loop.py:559`](../src/brain/runner/loop.py) -- `WorldStateUpdater.update_world_state()` refreshes the derived world model: NPC tracking (who appeared, who moved, who despawned), pet status, threat detection (approaching hostile entities), and health monitoring. This runs before rule evaluation so that rules see current-tick derived state.
 
 For tick 1147: the world model registers a level-appropriate NPC at 85 units distance that was not present on the previous tick. The threat scanner classifies it as non-hostile (not approaching). The entity enters the world model's tracking table.
 
 ## 4. Pre-rule event detection
 
-[`brain/runner/loop.py:581-583`](../src/brain/runner/loop.py) -- Three pre-rule handlers run: XP tracking (records any XP change), add detection (checks if a new NPC is attacking the pet), and auto-engage scanning (detects if the current target changed). These update `AgentContext` sub-state objects before the decision engine reads them.
+[`brain/runner/loop.py:570-572`](../src/brain/runner/loop.py) -- Three pre-rule handlers run: XP tracking (records any XP change), add detection (checks if a new NPC is attacking the pet), and auto-engage scanning (detects if the current target changed). These update `AgentContext` sub-state objects before the decision engine reads them.
 
 ## 5. Rule evaluation (the decision)
 
-[`brain/runner/loop.py:608`](../src/brain/runner/loop.py) -- `brain.tick(state)` enters the decision engine. Inside [`brain/decision.py:154-161`](../src/brain/decision.py):
+[`brain/runner/loop.py:593`](../src/brain/runner/loop.py) -- `_tick_brain` calls `brain.tick(state)`, entering the decision engine. Inside [`brain/decision.py:173-180`](../src/brain/decision.py):
 
 ```python
 def tick(self, state: GameState) -> None:
@@ -48,7 +48,7 @@ def tick(self, state: GameState) -> None:
 
 ### 5a. Rule scan
 
-[`brain/decision.py:163-255`](../src/brain/decision.py) -- At Phase 0 (binary conditions, insertion-order priority), rules evaluate top to bottom. The first rule whose condition returns `True` wins. After a winner is found, remaining rules are skipped.
+[`brain/decision.py:182`](../src/brain/decision.py) -- At Phase 0 (binary conditions, insertion-order priority), rules evaluate top to bottom. The first rule whose condition returns `True` wins. After a winner is found, remaining rules are skipped.
 
 For tick 1147, the evaluation cascade looks like this (from the decision receipt in the sample data):
 
@@ -86,7 +86,7 @@ For this tick: `tab_target()` sends a Tab keypress. The next perception snapshot
 
 ## 8. Observability
 
-[`brain/runner/loop.py:614`](../src/brain/runner/loop.py) -- `_tick_record_diag` runs after the brain tick completes:
+[`brain/runner/loop.py:599`](../src/brain/runner/loop.py) -- `_tick_record_diag` runs after the brain tick completes:
 
 - **Decision receipt**: a structured record of which rules fired, their scores, the selected routine, lock state, and tick timing. This is the data in [`docs/samples/decision-trace.md`](samples/decision-trace.md).
 - **Forensics ring buffer**: the last 300 ticks of brain state, continuously overwritten. On death or crash, this buffer flushes to disk -- 30 seconds of pre-incident telemetry.
@@ -95,7 +95,7 @@ For this tick: `tab_target()` sends a Tab keypress. The next perception snapshot
 
 ## 9. Heartbeat
 
-[`brain/runner/loop.py:613`](../src/brain/runner/loop.py) -- The heartbeat timestamp updates. A secondary thread monitors this value; if it goes stale for 10+ seconds, the watchdog triggers recovery (process reconnection or graceful shutdown).
+[`brain/runner/loop.py:598`](../src/brain/runner/loop.py) -- The heartbeat timestamp updates. A secondary thread monitors this value; if it goes stale for 10+ seconds, the watchdog triggers recovery (process reconnection or graceful shutdown).
 
 ---
 

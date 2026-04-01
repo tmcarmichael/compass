@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from eq.race_data import RACE_NAMES, RaceDB, RaceModelData, load_race_data
 
-
 # ---------------------------------------------------------------------------
 # RACE_NAMES static lookup (stubbed to empty)
 # ---------------------------------------------------------------------------

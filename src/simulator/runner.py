@@ -294,9 +294,7 @@ class SimulationRunner:
             self._ctx.metrics.total_casts += 2
             self._ctx.metrics.routine_counts["PULL"] += 1
             self._ctx.metrics.routine_counts["IN_COMBAT"] += 1
-            self._ctx.metrics.routine_time["PULL"] = (
-                self._ctx.metrics.routine_time.get("PULL", 0) + 3.0
-            )
+            self._ctx.metrics.routine_time["PULL"] = self._ctx.metrics.routine_time.get("PULL", 0) + 3.0
             self._ctx.metrics.routine_time["IN_COMBAT"] = (
                 self._ctx.metrics.routine_time.get("IN_COMBAT", 0) + duration
             )

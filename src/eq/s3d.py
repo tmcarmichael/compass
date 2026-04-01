@@ -22,8 +22,7 @@ class S3DArchive:
         self.path = Path(path)
         self._entries: dict[str, tuple[int, int]] = {}  # name -> (offset, size)
         raise NotImplementedError(
-            "S3DArchive parser stubbed in public release. "
-            "Provide an environment-specific implementation."
+            "S3DArchive parser stubbed in public release. Provide an environment-specific implementation."
         )
 
     def list_files(self) -> list[str]:

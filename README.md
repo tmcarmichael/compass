@@ -4,7 +4,7 @@
 ![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-brightgreen.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![CI](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml/badge.svg)
-![Coverage](<https://img.shields.io/badge/Coverage-71%25_(21.5K_measured)-blue.svg>)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/tmcarmichael/COVERAGE_GIST_ID/raw/coverage.json)](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml)
 
 A layered decision architecture for intelligent behavior in a real-time 3D world.
 
@@ -16,7 +16,7 @@ Compass is a control architecture for agents that must perceive, decide, and act
 
 The architecture evolved in a legacy 3D MMORPG sandbox. It progressed from a monolith through reactive rules, state-machine routines, and utility scoring before arriving at goal-oriented planning. Each transition came when the previous approach broke against the world's complexity.
 
-> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output.
+> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output. For a step-by-step trace from perception to motor output, see [`docs/walkthrough.md`](docs/walkthrough.md).
 
 ---
 
@@ -220,7 +220,7 @@ All samples in [docs/samples/](docs/samples/) are real output from live sessions
 | [Forensics buffer](docs/samples/forensics-ring-buffer.md)        | 300-tick ring buffer dump: skeleton aggro interrupts spell memorization, FLEE fires within one tick                  |
 | [Learned encounter data](docs/samples/learned-encounter-data.md) | Cross-session improvement: grade B → A, fight duration 29.5s → 15.9s, auto-tuned parameters drifting from defaults   |
 | [Fight event](docs/samples/structured-fight-event.md)            | Structured `fight_end` event with all 20 fields and embedded world snapshot                                          |
-| [Convergence](docs/samples/convergence.md)                       | 10-session headless run: fight duration drops 53% as encounter history accumulates and cost functions self-correct    |
+| [Convergence](docs/samples/convergence.md)                       | 10-session headless run: fight duration drops 53% as encounter history accumulates and cost functions self-correct   |
 | [Ablation results](docs/samples/ablation-results.md)             | Learning vs. defaults: 97% GOAP cost error reduction, 25x danger discrimination, weight tuning stability             |
 
 ---

@@ -227,7 +227,9 @@ class StructValidator:
             # Step 2: intermediate
             intermediate = self._r._read_pointer(ci + offsets.CHARINFO_PROFILE_INDIR)
             if intermediate == 0:
-                return CheckResult(name, False, f"character info+0x{offsets.CHARINFO_PROFILE_INDIR:03X} -> null")
+                return CheckResult(
+                    name, False, f"character info+0x{offsets.CHARINFO_PROFILE_INDIR:03X} -> null"
+                )
 
             # Step 3: profile base
             profile_base = self._r._read_pointer(intermediate + offsets.PROFILE_PTR_OFFSET)

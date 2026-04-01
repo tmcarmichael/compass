@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from eq.spells import SpellDB, SpellRole
+from eq.spells import SpellDB
 
 # ---------------------------------------------------------------------------
 # Helpers -- reuse the _spell factory
@@ -32,7 +32,7 @@ def _spell_data(
     range: int = 200,
     recast_ms: int = 0,
 ):
-    from eq.spells import ResistType, SpellData, TargetType
+    from eq.spells import SpellData
 
     if class_levels is None:
         class_levels = (255,) * 16

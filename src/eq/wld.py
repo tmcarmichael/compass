@@ -10,7 +10,6 @@ meshes, BSP spatial partitions, material definitions, and region markers
 
 from dataclasses import dataclass
 
-
 # ======================================================================
 # Data classes
 # ======================================================================
@@ -147,8 +146,7 @@ class WLDFile:
 
     def __init__(self, data: bytes) -> None:
         raise NotImplementedError(
-            "WLDFile parser stubbed in public release. "
-            "Provide an environment-specific implementation."
+            "WLDFile parser stubbed in public release. Provide an environment-specific implementation."
         )
 
     def extract_meshes(self) -> list[Mesh]:
