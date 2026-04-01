@@ -16,7 +16,7 @@ Compass is a control architecture for agents that must perceive, decide, and act
 
 The architecture evolved in a legacy 3D MMORPG sandbox. It progressed from a monolith through reactive rules, state-machine routines, and utility scoring before arriving at goal-oriented planning. Each transition came when the previous approach broke against the world's complexity.
 
-> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output. For a step-by-step trace from perception to motor output, see [`docs/walkthrough.md`](docs/walkthrough.md).
+> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output, or [`docs/walkthrough.md`](docs/walkthrough.md) for a step-by-step trace of one tick from perception to motor output.
 
 ---
 
