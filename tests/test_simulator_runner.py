@@ -139,7 +139,7 @@ def test_tick_goap_planner_advances_with_completed_step_effects() -> None:
 
     assert len(planner.advance_calls) == 1
     advanced_ws = planner.advance_calls[0]
-    assert getattr(advanced_ws, "has_target") is True
+    assert advanced_ws.has_target is True
     assert runner._ctx.diag.goap_suggestion == "PULL"
 
 

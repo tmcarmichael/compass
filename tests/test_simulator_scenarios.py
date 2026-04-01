@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import textwrap
 
-from perception.state import GameState, SpawnData
+from perception.state import GameState
 from simulator.scenarios import Scenario
 
 

@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Lazily expose the most useful runtime entry points."""
     if name == "AgentOrchestrator":
         from runtime.orchestrator import AgentOrchestrator

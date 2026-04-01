@@ -12,11 +12,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from brain.context import AgentContext
-from brain.learning.encounters import FightHistory
 from brain.goap.actions import PlanAction, build_action_set
 from brain.goap.goals import Goal, build_goal_set
 from brain.goap.planner import GOAPPlanner, Plan, _Node
 from brain.goap.world_state import PlanWorldState
+from brain.learning.encounters import FightHistory
 from tests.factories import make_fight_record, make_plan_world_state
 
 

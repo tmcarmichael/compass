@@ -101,4 +101,4 @@ The remaining uncovered lines are concentrated in multi-phase routine tick handl
 
 **Pure function tests** (`tests/test_routine_pure_functions.py`): unit tests for decision functions extracted from routines (`classify_dot_fizzle`, `verify_cast_landed`, `choose_pull_strategy`, `should_attempt_gate`, `should_cast_regen_buff`, `should_exit_rest`). No mocks, no motor, no state machines.
 
-**RecordingMotor** (`src/motor/recording.py`): installed by conftest for all tests. Captures motor action sequences for assertion. Eliminates all `time.sleep()` calls, making the test suite run in ~5 seconds.
+**RecordingMotor** (`src/motor/recording.py`): installed by conftest for all tests. Captures motor action sequences for assertion. Eliminates artificial `time.sleep()` delays so the full suite runs in tens of seconds instead of spending minutes blocked on routine timing.

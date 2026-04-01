@@ -30,7 +30,7 @@ This architecture was developed and validated against Classic EverQuest: a persi
 
 **Frozen dataclasses for perception snapshots eliminated concurrency bugs.** Before snapshots, the brain and secondary threads raced on mutable state. After switching to frozen GameState/SpawnData, every concurrency bug in the perception layer disappeared. The pattern is simple: produce immutable data, hand it off, never touch it again.
 
-**The non-blocking tick contract caught every bad pattern early.** The rule that `tick()` must never block for more than ~200ms prevented every attempt to add polling loops, long sleeps, or synchronous waits inside routines. Phase state machines are more code than a while loop, but they keep the brain responsive to emergencies.
+**The cooperative timing contract caught every bad pattern early.** Treating ~200ms as the routine soft budget, routing longer waits through interruptible sleep helpers, and force-killing any single `tick()` that runs longer than 5 seconds prevented polling loops, unbounded sleeps, and synchronous waits from taking over the brain loop. Phase state machines are more code than a while loop, but they keep the system responsive to emergencies.
 
 **Encounter history produced genuine cross-session improvement.** Once [learned data takes over](architecture.md#encounter-learning-per-encounter), the agent selects better strategies, avoids unwinnable encounters, and provides accurate cost estimates to the GOAP planner. The improvement is measurable in defeats/hour.
 

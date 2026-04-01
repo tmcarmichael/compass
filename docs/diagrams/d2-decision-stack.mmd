@@ -15,7 +15,7 @@ flowchart TD
     %% Reactive selection is the fallback when no plan is active, not the primary path.
     PR["Reactive Selection<br/>Priority Rules + Utility Scoring<br/>oscillation prevention · lock-in semantics"]
 
-    RO["Routines<br/>non-blocking state machines · enter · tick · exit<br/>tick() must return within 200ms"]
+    RO["Routines<br/>cooperative state machines · enter · tick · exit<br/>soft 200ms budget · interruptible waits · 5s hard kill"]
 
     ER -->|"emergency fires"| RO
     ER -->|"no emergency"| GP

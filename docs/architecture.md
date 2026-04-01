@@ -125,7 +125,7 @@ flowchart TD
 
     PR["Reactive Selection<br/>Priority Rules + Utility Scoring<br/>oscillation prevention · lock-in semantics"]
 
-    RO["Routines<br/>non-blocking state machines · enter · tick · exit<br/>tick() must return within 200ms"]
+    RO["Routines<br/>cooperative state machines · enter · tick · exit<br/>soft 200ms budget · interruptible waits · 5s hard kill"]
 
     ER -->|"emergency fires"| RO
     ER -->|"no emergency"| GP
@@ -232,9 +232,9 @@ def exit(self, state: GameState) -> None:        # called on deactivation
 - **SUCCESS**: completed normally.
 - **FAILURE**: failed, with `failure_reason` and `failure_category` set.
 
-### Non-Blocking Contract
+### Cooperative Timing Contract
 
-`tick()` must never block for more than ~200ms. The brain must evaluate emergency rules (FLEE) between every tick. Routines use phase state machines internally; they check conditions and advance phases, never spin in while loops or sleep.
+The brain targets a 10 Hz loop, so routine authors treat ~200ms as a cooperative soft budget in the common case. Some routines intentionally wait through cast bars or confirmation windows via interruptible sleeps; those waits poll for emergency conditions so the system can break out early when threat spikes. If a single `tick()` runs longer than 5 seconds, the brain force-exits it as hung.
 
 ### Key Routines
 

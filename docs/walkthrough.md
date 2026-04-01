@@ -101,6 +101,6 @@ For this tick: `tab_target()` sends a Tab keypress. The next perception snapshot
 
 ## Timing budget
 
-The entire sequence -- perception read, world update, rule evaluation, routine tick, motor output, diagnostics -- completes well under the 100ms tick budget. A typical tick takes 2-8ms. The routine contract (`tick()` must return within 200ms) ensures no single routine can starve the loop.
+The entire sequence -- perception read, world update, rule evaluation, routine tick, motor output, diagnostics -- targets a 100ms loop cadence. A typical decision tick takes 2-8ms. Routine authors treat 200ms as a cooperative soft budget, longer waits use interruptible sleeps that can break for emergencies, and any single `tick()` that runs past 5 seconds is force-exited as hung.
 
 If a tick overruns, the clock compensates by shortening the next sleep. The agent never drops ticks; it runs them late rather than skipping them.
