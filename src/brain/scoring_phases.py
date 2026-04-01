@@ -21,6 +21,29 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Score multiplier applied when GOAP planner suggests a specific action
+GOAP_BOOST = 1.5
+
+
+def _resolve_phase_context(brain: Brain) -> tuple[str, str]:
+    """Return (session_phase, goap_hint) from brain diagnostics."""
+    phase = "grinding"
+    goap_hint = ""
+    if brain._ctx and hasattr(brain._ctx, "diag") and brain._ctx.diag:
+        pd = getattr(brain._ctx.diag, "phase_detector", None)
+        if pd is not None:
+            phase = pd.current_phase
+        goap_hint = getattr(brain._ctx.diag, "goap_suggestion", "")
+    return phase, goap_hint
+
+
+def _apply_modifiers(score: float, phase: str, rule_name: str, goap_hint: str) -> float:
+    """Apply session-phase modifier and GOAP boost to a raw score."""
+    score *= get_phase_modifier(phase, rule_name)
+    if goap_hint and rule_name == goap_hint and score > 0:
+        score *= GOAP_BOOST
+    return score
+
 
 def compute_divergence(brain: Brain, state: GameState, now: float, binary_winner: str) -> None:
     """Phase 1: compute scores for all rules, log when score-based
@@ -74,25 +97,13 @@ def select_by_tier(
             continue
         tier_groups[r.tier].append(r)
 
-    # Get session phase for contextual score modifiers
-    phase = "grinding"
-    goap_hint = ""
-    if brain._ctx and hasattr(brain._ctx, "diag") and brain._ctx.diag:
-        pd = getattr(brain._ctx.diag, "phase_detector", None)
-        if pd is not None:
-            phase = pd.current_phase
-        goap_hint = getattr(brain._ctx.diag, "goap_suggestion", "")
+    phase, goap_hint = _resolve_phase_context(brain)
 
     for tier in sorted(tier_groups):
         scored: list[tuple[float, RuleDef]] = []
         for r in tier_groups[tier]:
             t0 = time.perf_counter()
-            s = r.score_fn(state)
-            # Apply session phase modifier (startup, incident, idle, etc.)
-            s *= get_phase_modifier(phase, r.name)
-            # GOAP planner boost: prefer the planned action
-            if goap_hint and r.name == goap_hint and s > 0:
-                s *= 1.5  # 50% score boost for GOAP-suggested action
+            s = _apply_modifiers(r.score_fn(state), phase, r.name, goap_hint)
             rule_times[r.name] = (time.perf_counter() - t0) * 1000
             rule_eval[r.name] = f"{s:.2f}" if s > 0 else "0"
             diag_results.append(f"{r.name}={s:.2f}")
@@ -114,14 +125,7 @@ def select_weighted(
     emergency: list[tuple[float, RuleDef]] = []
     normal: list[tuple[float, RuleDef]] = []
 
-    # Session phase for contextual modifiers
-    phase = "grinding"
-    goap_hint = ""
-    if brain._ctx and hasattr(brain._ctx, "diag") and brain._ctx.diag:
-        pd = getattr(brain._ctx.diag, "phase_detector", None)
-        if pd is not None:
-            phase = pd.current_phase
-        goap_hint = getattr(brain._ctx.diag, "goap_suggestion", "")
+    phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
         if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
@@ -131,12 +135,7 @@ def select_weighted(
             rule_times[r.name] = 0.0
             continue
         t0 = time.perf_counter()
-        s = r.score_fn(state)
-        # Apply session phase modifier
-        s *= get_phase_modifier(phase, r.name)
-        # GOAP planner boost
-        if goap_hint and r.name == goap_hint and s > 0:
-            s *= 1.5
+        s = _apply_modifiers(r.score_fn(state), phase, r.name, goap_hint)
         rule_times[r.name] = (time.perf_counter() - t0) * 1000
         weighted = r.weight * s
         rule_eval[r.name] = f"{weighted:.1f}" if s > 0 else "0"
@@ -171,13 +170,7 @@ def select_with_considerations(
     emergency: list[tuple[float, RuleDef]] = []
     normal: list[tuple[float, RuleDef]] = []
 
-    phase = "grinding"
-    goap_hint = ""
-    if brain._ctx and hasattr(brain._ctx, "diag") and brain._ctx.diag:
-        pd = getattr(brain._ctx.diag, "phase_detector", None)
-        if pd is not None:
-            phase = pd.current_phase
-        goap_hint = getattr(brain._ctx.diag, "goap_suggestion", "")
+    phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
         if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
@@ -189,12 +182,10 @@ def select_with_considerations(
         t0 = time.perf_counter()
         # Phase 4: prefer considerations over score_fn when defined
         if r.considerations and brain._ctx:
-            s = score_from_considerations(r.considerations, state, brain._ctx)
+            raw = score_from_considerations(r.considerations, state, brain._ctx)
         else:
-            s = r.score_fn(state)
-        s *= get_phase_modifier(phase, r.name)
-        if goap_hint and r.name == goap_hint and s > 0:
-            s *= 1.5
+            raw = r.score_fn(state)
+        s = _apply_modifiers(raw, phase, r.name, goap_hint)
         rule_times[r.name] = (time.perf_counter() - t0) * 1000
         weighted = r.weight * s
         rule_eval[r.name] = f"{weighted:.1f}" if s > 0 else "0"

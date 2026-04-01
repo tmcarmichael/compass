@@ -20,6 +20,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Routines returning RUNNING longer than this are force-exited.
+# Must exceed the combat casting pipeline (2-3 s legit) to avoid
+# killing active fights mid-cast.
+HARD_KILL_THRESHOLD_MS = 5000
+
 
 def tick_active_routine(brain: Brain, state: GameState, now: float) -> None:
     """Tick the active routine and handle SUCCESS/FAILURE/hard-kill outcomes."""
@@ -36,7 +41,7 @@ def tick_active_routine(brain: Brain, state: GameState, now: float) -> None:
     brain._ticked_routine_name = brain._active_name
 
     if status == RoutineStatus.RUNNING:
-        if brain.routine_tick_ms > 5000:
+        if brain.routine_tick_ms > HARD_KILL_THRESHOLD_MS:
             hard_kill_routine(brain, state, now)
         return
 
@@ -128,9 +133,7 @@ def notify_cycle_tracker(brain: Brain, state: GameState, status: RoutineStatus) 
 
 
 def hard_kill_routine(brain: Brain, state: GameState, now: float) -> None:
-    """Force-exit a routine that returned RUNNING but took >5 s."""
-    # Threshold must exceed combat casting pipeline (2-3s legit)
-    # to avoid killing active fights mid-cast.
+    """Force-exit a routine that exceeded HARD_KILL_THRESHOLD_MS."""
     log.error("[DECISION] HARD KILL: %s took %.0fms, forcing exit", brain._active_name, brain.routine_tick_ms)
     assert brain._active is not None
     brain._active.failure_reason = "hard_kill"

@@ -426,6 +426,54 @@ class TestDefeatActionCost:
 # ---------------------------------------------------------------------------
 
 
+class TestWanderActionSpawnPrediction:
+    """WanderAction.estimate_cost uses spawn predictions when available."""
+
+    def _wander(self) -> WanderAction:
+        return WanderAction(name="wander", routine_name="WANDER")
+
+    def test_no_ctx_returns_default(self) -> None:
+        assert self._wander().estimate_cost(None) == 30.0
+
+    def test_no_spawn_predictor_returns_default(self) -> None:
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(spawn_predictor=None)
+        assert self._wander().estimate_cost(ctx) == 30.0
+
+    def test_imminent_respawn_reduces_cost(self) -> None:
+        from types import SimpleNamespace
+
+        from core.types import Point
+
+        predictor = SimpleNamespace(
+            best_cells=lambda n, now: [(Point(100, 100, 0), 8.0)],
+        )
+        ctx = SimpleNamespace(spawn_predictor=predictor)
+        cost = self._wander().estimate_cost(ctx)
+        # 8s predicted wait -> cost should be 8.0 (clamped above 5.0)
+        assert cost == 8.0
+
+    def test_very_short_wait_clamps_to_minimum(self) -> None:
+        from types import SimpleNamespace
+
+        from core.types import Point
+
+        predictor = SimpleNamespace(
+            best_cells=lambda n, now: [(Point(50, 50, 0), 2.0)],
+        )
+        ctx = SimpleNamespace(spawn_predictor=predictor)
+        cost = self._wander().estimate_cost(ctx)
+        assert cost == 5.0  # floor of 5s travel time
+
+    def test_empty_predictions_returns_default(self) -> None:
+        from types import SimpleNamespace
+
+        predictor = SimpleNamespace(best_cells=lambda n, now: [])
+        ctx = SimpleNamespace(spawn_predictor=predictor)
+        assert self._wander().estimate_cost(ctx) == 30.0
+
+
 class TestAcquireActionCost:
     def test_estimate_cost(self) -> None:
         assert _acquire().estimate_cost(None) == 5.0

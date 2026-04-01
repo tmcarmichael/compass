@@ -327,6 +327,79 @@ class TestAdvanceWithTracking:
 # ---------------------------------------------------------------------------
 
 
+class TestMCRobustnessGate:
+    """Monte Carlo evaluation gates plan acceptance."""
+
+    def test_robust_plan_accepted(self, planner: GOAPPlanner) -> None:
+        """A plan from low resources should pass MC gate (robustness > 0.50)."""
+        ws = PlanWorldState(hp_pct=0.3, mana_pct=0.2, pet_alive=True, targets_available=3)
+        plan = planner.generate(ws)
+        # Low-resource state reliably produces a plan with rest -> acquire steps
+        assert plan is not None
+        assert plan.expected_satisfaction >= 0.50
+
+    def test_mc_sat_stored_on_plan(self, planner: GOAPPlanner) -> None:
+        ws = PlanWorldState(hp_pct=0.4, mana_pct=0.3, pet_alive=True, targets_available=5)
+        plan = planner.generate(ws)
+        assert plan is not None
+        # expected_satisfaction comes from MC evaluation, not deterministic check
+        assert 0.0 <= plan.expected_satisfaction <= 1.0
+
+
+class TestLearnedMCSigma:
+    """MC noise sigma derived from encounter posterior variance."""
+
+    def test_no_ctx_returns_default(self) -> None:
+        from brain.goap.planner import MC_NOISE_SIGMA
+
+        hp_sigma, mana_sigma = GOAPPlanner._learned_mc_sigma(None)
+        assert hp_sigma == MC_NOISE_SIGMA
+        assert mana_sigma == MC_NOISE_SIGMA
+
+    def test_no_fight_history_returns_default(self) -> None:
+        from types import SimpleNamespace
+
+        from brain.goap.planner import MC_NOISE_SIGMA
+
+        ctx = SimpleNamespace(fight_history=None)
+        hp_sigma, mana_sigma = GOAPPlanner._learned_mc_sigma(ctx)
+        assert hp_sigma == MC_NOISE_SIGMA
+        assert mana_sigma == MC_NOISE_SIGMA
+
+    def test_learned_variance_narrows_sigma(self) -> None:
+        from types import SimpleNamespace
+
+        # Tight posteriors (low variance) should produce small sigma
+        stats = SimpleNamespace(danger_post_var=0.01, mana_post_var=0.01, fights=10)
+        fh = SimpleNamespace(get_all_stats=lambda: {"skeleton": stats})
+        ctx = SimpleNamespace(fight_history=fh)
+        hp_sigma, mana_sigma = GOAPPlanner._learned_mc_sigma(ctx)
+        assert hp_sigma < 0.15  # tighter than default
+        assert mana_sigma < 0.15
+
+    def test_wide_posteriors_widen_sigma(self) -> None:
+        from types import SimpleNamespace
+
+        # Wide posteriors (high variance, few observations) -> larger sigma
+        stats = SimpleNamespace(danger_post_var=0.10, mana_post_var=0.15, fights=2)
+        fh = SimpleNamespace(get_all_stats=lambda: {"unknown_mob": stats})
+        ctx = SimpleNamespace(fight_history=fh)
+        hp_sigma, mana_sigma = GOAPPlanner._learned_mc_sigma(ctx)
+        assert hp_sigma >= 0.10
+        assert mana_sigma >= 0.10
+
+    def test_sigma_clamped_to_bounds(self) -> None:
+        from types import SimpleNamespace
+
+        # Extremely tight variance should clamp to 0.02 floor
+        stats = SimpleNamespace(danger_post_var=0.0001, mana_post_var=0.0001, fights=100)
+        fh = SimpleNamespace(get_all_stats=lambda: {"trivial": stats})
+        ctx = SimpleNamespace(fight_history=fh)
+        hp_sigma, mana_sigma = GOAPPlanner._learned_mc_sigma(ctx)
+        assert hp_sigma >= 0.02
+        assert mana_sigma >= 0.02
+
+
 class TestPlannerEdgeCases:
     def test_no_goals_returns_none(self) -> None:
         p = GOAPPlanner(goals=[], actions=build_action_set())

@@ -41,7 +41,8 @@ MAX_SEARCH_NODES = 500
 SATISFACTION_THRESHOLD = 0.70  # goal is "achieved enough" at this level
 PLAN_BUDGET_MS = 50.0  # max time for plan generation
 MC_ROLLOUTS = 20  # Monte Carlo rollouts per candidate plan
-MC_NOISE_SIGMA = 0.15  # noise on action effects during rollouts
+MC_NOISE_SIGMA = 0.15  # fallback noise when no learned variance available
+MC_ROBUSTNESS_THRESHOLD = 0.50  # reject plans below this MC satisfaction
 
 
 @dataclass(slots=True)
@@ -402,9 +403,9 @@ class GOAPPlanner:
         """Evaluate a candidate plan via Monte Carlo rollouts.
 
         Runs MC_ROLLOUTS stochastic simulations of the plan. In each rollout,
-        action effects are perturbed with Gaussian noise on continuous fields
-        (hp_pct, mana_pct) to simulate outcome uncertainty. Returns the mean
-        goal satisfaction across rollouts.
+        action effects are perturbed with noise drawn from learned posterior
+        variance (encounter history) when available, or fixed sigma as
+        fallback.  Returns the mean goal satisfaction across rollouts.
 
         A plan that achieves high satisfaction across noisy rollouts is robust
         to the inherent uncertainty in combat outcomes, rest durations, etc.
@@ -412,14 +413,18 @@ class GOAPPlanner:
         if not plan_actions:
             return goal.satisfaction(start)
 
+        # Derive noise sigma from learned posterior variance when available.
+        # Wider posteriors (less data) produce more noise, naturally penalising
+        # plans that depend on uncertain outcomes.
+        hp_sigma, mana_sigma = self._learned_mc_sigma(ctx)
+
         total_sat = 0.0
         for _ in range(MC_ROLLOUTS):
             ws = start
             for action in plan_actions:
                 ws = action.apply_effects(ws)
-                # Stochastic perturbation on continuous resource fields
-                hp_noise = random.gauss(0, MC_NOISE_SIGMA)
-                mana_noise = random.gauss(0, MC_NOISE_SIGMA)
+                hp_noise = random.gauss(0, hp_sigma)
+                mana_noise = random.gauss(0, mana_sigma)
                 ws = ws.with_changes(
                     hp_pct=max(0.0, min(1.0, ws.hp_pct + hp_noise)),
                     mana_pct=max(0.0, min(1.0, ws.mana_pct + mana_noise)),
@@ -427,6 +432,37 @@ class GOAPPlanner:
             total_sat += goal.satisfaction(ws)
 
         return total_sat / MC_ROLLOUTS
+
+    @staticmethod
+    def _learned_mc_sigma(ctx: AgentContext | None) -> tuple[float, float]:
+        """Derive MC noise sigma from encounter posterior variance.
+
+        When fight history has enough data, the posterior variance on HP loss
+        and mana cost reflects actual outcome uncertainty.  Wider posteriors
+        (fewer observations) produce larger sigma, so plans that depend on
+        poorly-known actions are penalised more heavily.
+
+        Falls back to MC_NOISE_SIGMA when no learned data is available.
+        """
+        if not ctx or not ctx.fight_history:
+            return MC_NOISE_SIGMA, MC_NOISE_SIGMA
+        all_stats = ctx.fight_history.get_all_stats()
+        if not all_stats:
+            return MC_NOISE_SIGMA, MC_NOISE_SIGMA
+        # Average posterior std across known entity types
+        hp_vars: list[float] = []
+        mana_vars: list[float] = []
+        for stats in all_stats.values():
+            if stats.danger_post_var > 0:
+                hp_vars.append(stats.danger_post_var)
+            if stats.mana_post_var > 0:
+                mana_vars.append(stats.mana_post_var)
+        hp_sigma = (sum(hp_vars) / len(hp_vars)) ** 0.5 if hp_vars else MC_NOISE_SIGMA
+        mana_sigma = (sum(mana_vars) / len(mana_vars)) ** 0.5 if mana_vars else MC_NOISE_SIGMA
+        # Clamp to reasonable range
+        hp_sigma = max(0.02, min(0.40, hp_sigma))
+        mana_sigma = max(0.02, min(0.40, mana_sigma))
+        return hp_sigma, mana_sigma
 
     # -- Internal: A* Search ----------------------------------------------------
 
@@ -462,9 +498,20 @@ class GOAPPlanner:
             # Goal test: deterministic satisfaction check
             sat = goal.satisfaction(node.state)
             if sat >= SATISFACTION_THRESHOLD:
-                # Monte Carlo robustness check: verify the plan holds
-                # under stochastic action outcomes.
+                # Monte Carlo robustness gate: reject plans that don't hold
+                # under stochastic action outcomes.  Uses learned posterior
+                # variance when available, fixed sigma as fallback.
                 mc_sat = self._mc_evaluate(node.actions, start, goal, ctx)
+                if mc_sat < MC_ROBUSTNESS_THRESHOLD:
+                    log.log(
+                        VERBOSE,
+                        "[GOAP] Plan rejected (mc_sat=%.2f < %.2f): %d steps, cost=%.1f",
+                        mc_sat,
+                        MC_ROBUSTNESS_THRESHOLD,
+                        len(node.actions),
+                        node.g_cost,
+                    )
+                    continue  # keep searching for a more robust plan
                 log.log(
                     VERBOSE,
                     "[GOAP] Plan found: %d steps, %d nodes, cost=%.1f, sat=%.2f, mc_sat=%.2f",

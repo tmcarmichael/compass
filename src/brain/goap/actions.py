@@ -199,6 +199,23 @@ class WanderAction(PlanAction):
         return ws.with_changes(targets_available=1)
 
     def estimate_cost(self, ctx: AgentContext | None) -> float:
+        """Use spawn prediction to reduce wander cost when respawns are imminent.
+
+        If the spawn predictor has enough data, the expected time-to-next-respawn
+        in nearby cells replaces the default heuristic.  This makes the planner
+        prefer wander-then-fight plans when targets are predicted to appear soon,
+        converting random wandering into directed positioning.
+        """
+        if not ctx or not ctx.spawn_predictor:
+            return _DEFAULT_COSTS["wander"]
+        import time as _time
+
+        best = ctx.spawn_predictor.best_cells(3, _time.time())
+        if best:
+            # Use the shortest predicted wait among nearby cells
+            min_wait = min(secs for _, secs in best)
+            # Blend: at least 5s (travel time), at most the default
+            return max(5.0, min(min_wait, _DEFAULT_COSTS["wander"]))
         return _DEFAULT_COSTS["wander"]
 
 
