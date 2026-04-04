@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 from util.clock import TickClock
 
 
@@ -39,3 +42,16 @@ class TestWaitForNextTick:
         result = c.wait_for_next_tick()
         assert isinstance(result, float)
         assert result == c.dt
+
+    def test_stop_event_interrupts_sleep(self) -> None:
+        """A slow clock (1 Hz = 1s sleep) should return almost immediately when stop_event fires."""
+        stop = threading.Event()
+        c = TickClock(tick_rate_hz=1.0, stop_event=stop)
+        c.wait_for_next_tick()  # first tick, sets _last_tick
+
+        # Fire stop_event after 50ms -- wait_for_next_tick should unblock well before 1s
+        threading.Timer(0.05, stop.set).start()
+        t0 = time.perf_counter()
+        c.wait_for_next_tick()
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 0.3, f"expected fast wakeup, took {elapsed:.3f}s"

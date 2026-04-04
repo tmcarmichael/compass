@@ -19,6 +19,7 @@ from brain.world.anomaly import (
     IssueSeverity,
     IssueType,
 )
+from core.types import Point
 from tests.factories import make_game_state
 
 # ---------------------------------------------------------------------------
@@ -27,7 +28,7 @@ from tests.factories import make_game_state
 
 
 def _make_camp(camp_x: float = 100.0, camp_y: float = 100.0, roam_radius: float = 100.0) -> Any:
-    ns = SimpleNamespace(camp_x=camp_x, camp_y=camp_y, roam_radius=roam_radius)
+    ns = SimpleNamespace(camp_pos=Point(camp_x, camp_y, 0.0), roam_radius=roam_radius)
     ns.distance_to_camp = lambda state: 50.0  # default, overridden per-test
     return ns
 

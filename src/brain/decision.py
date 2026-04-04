@@ -36,12 +36,10 @@ from typing import TYPE_CHECKING
 from brain.circuit_breaker import CircuitBreaker
 from brain.completion import tick_active_routine
 from brain.profiling import tick_profiling
-from brain.rule_def import RuleDef
+from brain.rule_def import Consideration, RuleDef
 from brain.scoring_phases import (
+    build_phase_selector,
     compute_divergence,
-    select_by_tier,
-    select_weighted,
-    select_with_considerations,
 )
 from brain.transitions import handle_transition
 from perception.state import GameState
@@ -90,6 +88,7 @@ class Brain:
         self._active_start_time: float = 0.0  # when current routine activated
         self._last_lock_blocked: str = ""  # suppress repeated lock messages
         self.utility_phase: int = utility_phase
+        self._phase_selector = build_phase_selector(utility_phase)
 
         # Per-tick profiling (rule eval + routine tick times in ms)
         self.rule_times: dict[str, float] = {}  # rule_name -> eval ms
@@ -120,7 +119,7 @@ class Brain:
         score_fn: Callable[[GameState], float] | None = None,
         tier: int = 0,
         weight: float = 1.0,
-        considerations: list | None = None,
+        considerations: list[Consideration] | None = None,
         breaker_max_failures: int = 5,
         breaker_window: float = 300.0,
         breaker_recovery: float = 120.0,
@@ -170,6 +169,23 @@ class Brain:
                 recovery_seconds=breaker_recovery,
             )
 
+    # -- Public accessors (used by BrainRunner, simulator) --
+
+    @property
+    def active_routine(self) -> RoutineBase | None:
+        """The currently running routine, or None."""
+        return self._active
+
+    @property
+    def active_routine_name(self) -> str:
+        """Name of the currently running routine."""
+        return self._active_name
+
+    @property
+    def last_matched_rule(self) -> str:
+        """Name of the rule that matched on the most recent tick."""
+        return self._last_matched_rule
+
     def tick(self, state: GameState) -> None:
         """Evaluate rules and run the appropriate routine."""
         tick_start = self.perf_clock()
@@ -199,51 +215,9 @@ class Brain:
         rule_eval: dict[str, str] = {}
         rule_times: dict[str, float] = {}
 
-        if self.utility_phase >= 4:
-            selected, selected_name, selected_emergency = select_with_considerations(
-                self, state, now, rule_eval, diag_results, rule_times
-            )
-        elif self.utility_phase >= 3:
-            selected, selected_name, selected_emergency = select_weighted(
-                self, state, now, rule_eval, diag_results, rule_times
-            )
-        elif self.utility_phase >= 2:
-            selected, selected_name, selected_emergency = select_by_tier(
-                self, state, now, rule_eval, diag_results, rule_times
-            )
-        else:
-            # Phase 0/1: binary conditions, insertion-order priority.
-            # Short-circuit after winner found: skip condition evaluation
-            # for lower-priority rules. This is safe because detection
-            # logic (threat scan, add detection) runs pre-rule in the
-            # tick pipeline, not inside condition functions.
-            for r in self._rules:
-                if r.name in self._cooldowns and now < self._cooldowns[r.name]:
-                    remaining = self._cooldowns[r.name] - now
-                    rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
-                    diag_results.append(f"{r.name}=CD")
-                    rule_times[r.name] = 0.0
-                    continue
-                breaker = self._breakers.get(r.name)
-                if breaker and not breaker.allow():
-                    rule_eval[r.name] = "OPEN"
-                    diag_results.append(f"{r.name}=OPEN")
-                    rule_times[r.name] = 0.0
-                    continue
-                if selected is not None:
-                    rule_eval[r.name] = "skip"
-                    diag_results.append(f"{r.name}=skip")
-                    rule_times[r.name] = 0.0
-                    continue
-                t0 = self.perf_clock()
-                matched = r.condition(state)
-                rule_times[r.name] = (self.perf_clock() - t0) * 1000
-                rule_eval[r.name] = "YES" if matched else "no"
-                diag_results.append(f"{r.name}={'YES' if matched else 'no'}")
-                if matched:
-                    selected = r.routine
-                    selected_name = r.name
-                    selected_emergency = r.emergency
+        selected, selected_name, selected_emergency = self._phase_selector.select(
+            self, state, now, rule_eval, diag_results, rule_times
+        )
 
         # Phase 1+: compute scores in parallel for divergence logging
         if self.utility_phase >= 1:

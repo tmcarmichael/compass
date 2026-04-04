@@ -47,6 +47,7 @@ def _make_state(
         speed_run=speed_run,
         is_sitting=is_sitting,
         stand_state=stand_state,
+        pos=Point(x, y, 0.0),
     )
 
 
@@ -179,20 +180,20 @@ class TestHeadingController:
 class TestMovementControllerStuckPoints:
     def test_record_and_check_stuck_point(self) -> None:
         mc = MovementController()
-        mc.record_stuck_point(100.0, 200.0)
-        assert mc.is_near_stuck_point(105.0, 205.0) is True
-        assert mc.is_near_stuck_point(500.0, 500.0) is False
+        mc.record_stuck_point(Point(100.0, 200.0, 0.0))
+        assert mc.is_near_stuck_point(Point(105.0, 205.0, 0.0)) is True
+        assert mc.is_near_stuck_point(Point(500.0, 500.0, 0.0)) is False
 
     def test_duplicate_stuck_point_deduped(self) -> None:
         mc = MovementController()
-        mc.record_stuck_point(100.0, 200.0)
-        mc.record_stuck_point(105.0, 205.0)  # within STUCK_AVOIDANCE_RADIUS
+        mc.record_stuck_point(Point(100.0, 200.0, 0.0))
+        mc.record_stuck_point(Point(105.0, 205.0, 0.0))  # within STUCK_AVOIDANCE_RADIUS
         assert len(mc.get_stuck_points()) == 1
 
     def test_distant_stuck_points_both_recorded(self) -> None:
         mc = MovementController()
-        mc.record_stuck_point(100.0, 200.0)
-        mc.record_stuck_point(500.0, 600.0)  # far away
+        mc.record_stuck_point(Point(100.0, 200.0, 0.0))
+        mc.record_stuck_point(Point(500.0, 600.0, 0.0))  # far away
         assert len(mc.get_stuck_points()) == 2
 
     def test_load_stuck_points(self) -> None:
@@ -200,14 +201,14 @@ class TestMovementControllerStuckPoints:
         points = [Point(10.0, 20.0, 0.0), Point(30.0, 40.0, 0.0)]
         mc.load_stuck_points(points)
         assert len(mc.get_stuck_points()) == 2
-        assert mc.is_near_stuck_point(10.0, 20.0) is True
+        assert mc.is_near_stuck_point(Point(10.0, 20.0, 0.0)) is True
 
     def test_load_clears_existing(self) -> None:
         mc = MovementController()
-        mc.record_stuck_point(100.0, 200.0)
+        mc.record_stuck_point(Point(100.0, 200.0, 0.0))
         mc.load_stuck_points([Point(500.0, 600.0, 0.0)])
         assert len(mc.get_stuck_points()) == 1
-        assert mc.is_near_stuck_point(100.0, 200.0) is False
+        assert mc.is_near_stuck_point(Point(100.0, 200.0, 0.0)) is False
 
     def test_stuck_event_count(self) -> None:
         mc = MovementController()
@@ -338,7 +339,7 @@ class TestModuleLevelStuckAPI:
     def test_module_level_load_and_check(self) -> None:
         """The module singleton forwards to _controller."""
         load_stuck_points([Point(999.0, 999.0, 0.0)])
-        assert is_near_stuck_point(999.0, 999.0) is True
+        assert is_near_stuck_point(Point(999.0, 999.0, 0.0)) is True
         points = get_stuck_points()
         assert any(p.x == 999.0 and p.y == 999.0 for p in points)
         # Clean up

@@ -21,7 +21,7 @@ from brain.rules.navigation import (
     register,
 )
 from core.features import flags
-from core.types import CampType, PlanType, TravelMode
+from core.types import CampType, PlanType, Point, TravelMode
 from perception.state import GameState
 from routines.base import RoutineBase, RoutineStatus
 from tests.factories import make_game_state, make_spawn
@@ -105,8 +105,7 @@ class TestShouldWander:
         """Being > 400u from camp sets a TRAVEL plan instead of wandering."""
         state = make_game_state(x=500.0, y=500.0)
         ctx = AgentContext()
-        ctx.camp.camp_x = 10.0  # non-zero so the camp distance check fires
-        ctx.camp.camp_y = 10.0
+        ctx.camp.camp_pos = Point(10.0, 10.0, 0.0)  # non-zero so the camp distance check fires
 
         result = _should_wander(state, ctx)
         assert result is False
@@ -426,8 +425,7 @@ class TestShouldWanderAdditional:
 
         state = make_game_state(x=500.0, y=500.0)
         ctx = AgentContext()
-        ctx.camp.camp_x = 10.0
-        ctx.camp.camp_y = 10.0
+        ctx.camp.camp_pos = Point(10.0, 10.0, 0.0)
         ctx.camp.camp_type = CampType.LINEAR
         # Set patrol path so nearest_point_on_path returns a point on the path
         ctx.camp.patrol_waypoints = [Point(0.0, 50.0, 0.0), Point(100.0, 50.0, 0.0)]
@@ -439,11 +437,10 @@ class TestShouldWanderAdditional:
         assert ctx.plan.travel.target_y == 50.0
 
     def test_circular_camp_returns_to_camp_center(self) -> None:
-        """CIRCULAR (default) camp returns to camp_x/camp_y."""
+        """CIRCULAR (default) camp returns to camp_pos."""
         state = make_game_state(x=500.0, y=500.0)
         ctx = AgentContext()
-        ctx.camp.camp_x = 10.0
-        ctx.camp.camp_y = 10.0
+        ctx.camp.camp_pos = Point(10.0, 10.0, 0.0)
         # Default camp_type is CIRCULAR
 
         result = _should_wander(state, ctx)

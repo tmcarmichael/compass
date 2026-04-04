@@ -9,11 +9,16 @@ from core.types import Point
 from util.log_tiers import VERBOSE
 
 if TYPE_CHECKING:
-    from brain.context import AgentContext
+    from typing import Protocol
+
+    from brain.world.model import WorldModel
     from perception.state import GameState
 
+    class _HasWorld(Protocol):
+        world: WorldModel | None
 
-def damaged_npcs_near(ctx: AgentContext, state: GameState, pos: Point, radius: float) -> list[object]:
+
+def damaged_npcs_near(ctx: _HasWorld, state: GameState, pos: Point, radius: float) -> list[object]:
     """Get damaged NPCs within radius, with fallback if WorldModel is None."""
     world = ctx.world
     if world:

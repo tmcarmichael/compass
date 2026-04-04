@@ -151,7 +151,7 @@ class TravelRoutine(RoutineBase):
             raw_wps = []
 
             if terrain:
-                path = terrain.find_path(state.x, state.y, self._target_x, self._target_y)
+                path = terrain.find_path(state.pos, Point(self._target_x, self._target_y, state.z))
                 if path and len(path) > 1:
                     raw_wps = path[1:]
                     log.info("[TRAVEL] Travel: A* path with %d waypoints", len(raw_wps))
@@ -191,8 +191,7 @@ class TravelRoutine(RoutineBase):
         tol = 12.0 if is_final else 18.0
 
         arrived = move_to_point(
-            wp.x,
-            wp.y,
+            wp,
             self._read_state_fn,
             arrival_tolerance=tol,
             timeout=30.0,
@@ -232,8 +231,7 @@ class TravelRoutine(RoutineBase):
         dist = state.pos.dist_to(Point(self._target_x, self._target_y, 0.0))
         if dist > 5.0:
             move_to_point(
-                self._target_x,
-                self._target_y,
+                Point(self._target_x, self._target_y, 0.0),
                 self._read_state_fn,
                 arrival_tolerance=3.0,
                 timeout=5.0,

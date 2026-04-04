@@ -224,7 +224,7 @@ class HeadingController:
         Returns:
             True if already facing (within tolerance), False if turn was needed.
         """
-        desired = heading_to(current_x, current_y, target_x, target_y)
+        desired = heading_to(Point(current_x, current_y, 0.0), Point(target_x, target_y, 0.0))
         self._last_desired = desired
         heading_error = abs(angle_diff(current_heading, desired))
 
@@ -336,20 +336,25 @@ class MovementController:
 
     # -- Stuck point management --
 
-    def record_stuck_point(self, x: float, y: float, z: float = 0.0) -> None:
+    def record_stuck_point(self, pos: Point) -> None:
         """Record a stuck location for future avoidance."""
         with self._stuck_lock:
             for sp in self._stuck_points:
-                if abs(x - sp.x) < STUCK_AVOIDANCE_RADIUS and abs(y - sp.y) < STUCK_AVOIDANCE_RADIUS:
+                if abs(pos.x - sp.x) < STUCK_AVOIDANCE_RADIUS and abs(pos.y - sp.y) < STUCK_AVOIDANCE_RADIUS:
                     return
-            self._stuck_points.append(Point(x, y, z))
+            self._stuck_points.append(pos)
             count = len(self._stuck_points)
-        log.info("[POSITION] Stuck point recorded: (%.0f, %.0f) -- total %d known stuck points", x, y, count)
+        log.info(
+            "[POSITION] Stuck point recorded: (%.0f, %.0f) -- total %d known stuck points",
+            pos.x,
+            pos.y,
+            count,
+        )
 
-    def is_near_stuck_point(self, x: float, y: float) -> bool:
+    def is_near_stuck_point(self, pos: Point) -> bool:
         """Check if a position is near a known stuck point (XY)."""
         for sp in self._stuck_points:
-            if distance_2d(x, y, sp.x, sp.y) < STUCK_AVOIDANCE_RADIUS:
+            if pos.dist_2d(sp) < STUCK_AVOIDANCE_RADIUS:
                 return True
         return False
 
@@ -374,8 +379,7 @@ class MovementController:
 
     def move_to_point(
         self,
-        target_x: float,
-        target_y: float,
+        target: Point,
         read_state_fn: ReadStateFn,
         arrival_tolerance: float = 15.0,
         heading_tolerance: float = 5.0,
@@ -400,17 +404,16 @@ class MovementController:
         # If terrain is available and distance is significant, try A* pathfinding
         if self.terrain:
             state = read_state_fn()
-            dist = distance_2d(state.x, state.y, target_x, target_y)
+            dist = state.pos.dist_2d(target)
             if dist > 50:
-                path = self.terrain.find_path(state.x, state.y, target_x, target_y, start_z=state.z)
+                path = self.terrain.find_path(state.pos, target)
                 if path and len(path) > 2:
                     # Follow A* waypoints sequentially (skip first = current pos)
                     for i, wp in enumerate(path[1:], 1):
                         is_final = i == len(path) - 1
                         tol = arrival_tolerance if is_final else arrival_tolerance * 1.5
                         ok = self._move_to_point_inner(
-                            wp.x,
-                            wp.y,
+                            wp,
                             read_state_fn,
                             arrival_tolerance=tol,
                             heading_tolerance=heading_tolerance,
@@ -423,8 +426,7 @@ class MovementController:
                     return True
 
         return self._move_to_point_inner(
-            target_x,
-            target_y,
+            target,
             read_state_fn,
             arrival_tolerance=arrival_tolerance,
             heading_tolerance=heading_tolerance,
@@ -435,8 +437,7 @@ class MovementController:
 
     def _move_to_point_inner(
         self,
-        target_x: float,
-        target_y: float,
+        target: Point,
         read_state_fn: ReadStateFn,
         arrival_tolerance: float = 15.0,
         heading_tolerance: float = 5.0,
@@ -448,8 +449,8 @@ class MovementController:
         stuck_detector = StuckDetector(check_seconds=1.0, min_distance=3.0)
         recovery = StuckRecovery()
         start_time = time.perf_counter()
-        current_target_x = target_x
-        current_target_y = target_y
+        current_target_x = target.x
+        current_target_y = target.y
         detour_active = False
         moving = False
         last_pos_log = 0.0
@@ -470,7 +471,7 @@ class MovementController:
                         "[POSITION] move_to_point cancelled at (%.0f, %.0f) dist=%.0f to target",
                         state.x,
                         state.y,
-                        distance_2d(state.x, state.y, target_x, target_y),
+                        state.pos.dist_2d(target),
                     )
                     return False
 
@@ -489,12 +490,12 @@ class MovementController:
                         timeout,
                         state.x,
                         state.y,
-                        distance_2d(state.x, state.y, target_x, target_y),
+                        state.pos.dist_2d(target),
                     )
                     return False
 
                 state = read_state_fn()
-                dist_to_final = distance_2d(state.x, state.y, target_x, target_y)
+                dist_to_final = state.pos.dist_2d(target)
 
                 # Periodic position logging during movement
                 now = time.perf_counter()
@@ -512,8 +513,8 @@ class MovementController:
                 if dist_to_final <= arrival_tolerance:
                     log.info(
                         "[POSITION] Arrived at (%.0f, %.0f) dist=%.0f in %.1fs",
-                        target_x,
-                        target_y,
+                        target.x,
+                        target.y,
                         dist_to_final,
                         elapsed,
                     )
@@ -523,8 +524,8 @@ class MovementController:
                 if detour_active and self._detour_reached(
                     state, current_target_x, current_target_y, arrival_tolerance
                 ):
-                    current_target_x = target_x
-                    current_target_y = target_y
+                    current_target_x = target.x
+                    current_target_y = target.y
                     detour_active = False
 
                 # Sitting guard: if the character is sitting, movement keys
@@ -535,14 +536,13 @@ class MovementController:
                     continue
 
                 # Stuck detection  -  fast response (speed-based + displacement)
-                if moving and stuck_detector.check(state.x, state.y, speed=state.speed_run):
+                if moving and stuck_detector.check(state.pos, speed=state.speed_run):
                     stuck_result = self._handle_stuck(
                         state,
                         recovery,
                         read_state_fn,
                         stuck_detector,
-                        target_x,
-                        target_y,
+                        target,
                         dist_to_final,
                         elapsed,
                         max_stuck_recoveries,
@@ -551,8 +551,8 @@ class MovementController:
                         return False
                     moving = False
                     if detour_active:
-                        current_target_x = target_x
-                        current_target_y = target_y
+                        current_target_x = target.x
+                        current_target_y = target.y
                         detour_active = False
                     continue
 
@@ -568,8 +568,8 @@ class MovementController:
                         state,
                         current_target_x,
                         current_target_y,
-                        target_x,
-                        target_y,
+                        target.x,
+                        target.y,
                         last_detour_x,
                         last_detour_y,
                         repeat_detour_count,
@@ -581,7 +581,7 @@ class MovementController:
                         detour_active = True
 
                 # Face toward target and start/continue moving
-                desired = heading_to(state.x, state.y, current_target_x, current_target_y)
+                desired = heading_to(state.pos, Point(current_target_x, current_target_y, 0.0))
                 moving, last_face_fail = self._face_and_move(
                     desired,
                     read_state_fn,
@@ -689,8 +689,7 @@ class MovementController:
         recovery: StuckRecovery,
         read_state_fn: ReadStateFn,
         stuck_detector: StuckDetector,
-        target_x: float,
-        target_y: float,
+        target: Point,
         dist_to_final: float,
         elapsed: float,
         max_stuck_recoveries: int,
@@ -700,16 +699,15 @@ class MovementController:
             log.warning(
                 "[POSITION] Stuck %d times, giving up on (%.1f, %.1f)",
                 recovery.attempt + 1,
-                target_x,
-                target_y,
+                target.x,
+                target.y,
             )
             return False
         self._execute_stuck_recovery(
             state,
             recovery,
             read_state_fn,
-            target_x,
-            target_y,
+            target,
             dist_to_final,
             elapsed,
             max_stuck_recoveries,
@@ -722,14 +720,13 @@ class MovementController:
         state: GameState,
         recovery: StuckRecovery,
         read_state_fn: ReadStateFn,
-        target_x: float,
-        target_y: float,
+        target: Point,
         dist_to_final: float,
         elapsed: float,
         max_stuck_recoveries: int,
     ) -> None:
         """Log stuck context, execute escalating recovery, log result."""
-        desired = heading_to(state.x, state.y, target_x, target_y)
+        desired = heading_to(state.pos, target)
         hdg_err = angle_diff(state.heading, desired)
         terrain_tag = ""
         if self.terrain:
@@ -749,8 +746,8 @@ class MovementController:
             hdg_err,
             state.speed_run,
             dist_to_final,
-            target_x,
-            target_y,
+            target.x,
+            target.y,
             elapsed,
             recovery.attempt + 1,
             max_stuck_recoveries,
@@ -769,7 +766,7 @@ class MovementController:
             post.y,
             post.heading,
             delta,
-            distance_2d(post.x, post.y, target_x, target_y),
+            post.pos.dist_2d(target),
         )
 
 
@@ -900,13 +897,13 @@ class MovementPhase:
             return None  # yield, re-check next tick
 
         # Stuck detection (only while actively moving)
-        if self._moving and self._stuck_detector.check(state.x, state.y, speed=state.speed_run):
+        if self._moving and self._stuck_detector.check(state.pos, speed=state.speed_run):
             if self._recovery.attempt >= self._max_stuck_recoveries:
                 log.warning("[POSITION] MovementPhase stuck %d times, giving up", self._recovery.attempt + 1)
                 self._finish(False, "stuck")
                 return False
 
-            desired = heading_to(state.x, state.y, self._target_x, self._target_y)
+            desired = heading_to(state.pos, Point(self._target_x, self._target_y, 0.0))
             hdg_err = angle_diff(state.heading, desired)
             log.info(
                 "[POSITION] MovementPhase stuck at (%.0f,%.0f) hdg=%.0f err=%.0f dist=%.0f (recovery %d/%d)",
@@ -927,7 +924,7 @@ class MovementPhase:
             return None  # yield after recovery, re-face next tick
 
         # Face toward target and start walking
-        desired = heading_to(state.x, state.y, self._target_x, self._target_y)
+        desired = heading_to(state.pos, Point(self._target_x, self._target_y, 0.0))
         self._face_and_walk(state, desired)
 
         # No sleep -- return immediately, brain will call us again next tick
@@ -988,9 +985,9 @@ def get_stuck_event_count() -> int:
     return _controller.stuck_event_count
 
 
-def is_near_stuck_point(x: float, y: float) -> bool:
+def is_near_stuck_point(pos: Point) -> bool:
     """Check if a position is near a known stuck point."""
-    return _controller.is_near_stuck_point(x, y)
+    return _controller.is_near_stuck_point(pos)
 
 
 def get_stuck_points() -> list[Point]:
@@ -1065,8 +1062,7 @@ def clear_movement_cancel() -> None:
 
 
 def move_to_point(
-    target_x: float,
-    target_y: float,
+    target: Point,
     read_state_fn: ReadStateFn,
     arrival_tolerance: float = 15.0,
     heading_tolerance: float = 5.0,
@@ -1079,8 +1075,7 @@ def move_to_point(
     Thin wrapper that delegates to the module-level MovementController singleton.
     """
     return _controller.move_to_point(
-        target_x,
-        target_y,
+        target,
         read_state_fn,
         arrival_tolerance=arrival_tolerance,
         heading_tolerance=heading_tolerance,

@@ -3,7 +3,7 @@
 Contains 12 focused sub-state objects for clean grouping:
   ctx.combat     -  CombatState (engaged, pull_target_id, dot/lifetap timers)
   ctx.pet        -  PetState (alive, spawn_id, name, has_add)
-  ctx.camp       -  CampConfig (camp_x/y, guard_x/y, hunt zone, danger points)
+  ctx.camp       -  CampConfig (camp_pos, guard_pos, hunt zone, danger points)
   ctx.inventory  -  InventoryState (weight tracking, loot count)
   ctx.plan       -  PlanState (typed travel plans)
   ctx.player     -  PlayerState (death, position, engagement)

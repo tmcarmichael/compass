@@ -35,12 +35,26 @@ def handle_transition(
     if brain._ctx and brain._ctx.combat.engaged:
         maybe_clear_stale_engagement(brain, state, selected, now)
 
+    # Check lock timeout even when the active routine re-selects itself,
+    # otherwise max_lock_seconds is bypassed whenever the locked routine
+    # keeps winning selection (the early return below would skip the check).
+    force_exited: RoutineBase | None = None
+    if brain._active is not None and brain._active.locked and brain._active_start_time > 0:
+        force_exited = maybe_force_lock_exit(brain, state, now)
+
     if selected is brain._active:
         return
 
-    # Check lock timeout before honoring the lock
-    if brain._active is not None and brain._active.locked and brain._active_start_time > 0:
-        maybe_force_lock_exit(brain, state, now)
+    # Prevent re-entry of a routine that was just force-exited this tick.
+    # Without this guard, a timed-out routine with failure_cooldown=0 that
+    # still wins selection would be exited and immediately re-entered,
+    # bypassing the timeout entirely.
+    if force_exited is not None and selected is force_exited:
+        log.warning(
+            "[DECISION] Brain: %s won re-selection after lock timeout -- deferring to next tick",
+            selected_name,
+        )
+        return
 
     # Locked routines can only be interrupted by emergency rules
     if brain._active is not None and brain._active.locked and not selected_emergency:
@@ -146,18 +160,26 @@ def log_decision_receipt(brain: Brain, rule_name: str, emergency: bool, state: G
     if score_str and score_str != "0":
         parts.append(f"score={score_str}")
 
-    # Top alternative (highest-scoring rule that was NOT selected)
+    # Top alternative (highest-scoring rule that was NOT selected).
+    # Parse as float to avoid lexicographic mis-ordering ("9.9" > "10.0")
+    # and filter non-numeric entries (OPEN, cond=F, cooldown, ERROR, skip).
     evals = brain._ctx.diag.last_rule_evaluation
     alt_name = ""
-    alt_score = ""
+    alt_score_val = 0.0
     for rname, rval in evals.items():
-        if rname == rule_name or rval in ("0", ""):
+        if rname == rule_name:
             continue
-        if not alt_name or rval > alt_score:
+        try:
+            score_val = float(rval)
+        except ValueError:
+            continue
+        if score_val <= 0.0:
+            continue
+        if score_val > alt_score_val:
             alt_name = rname
-            alt_score = rval
+            alt_score_val = score_val
     if alt_name:
-        parts.append(f"alt={alt_name}({alt_score})")
+        parts.append(f"alt={alt_name}({alt_score_val:.1f})")
 
     log.info(" | ".join(parts))
 
@@ -245,18 +267,22 @@ def maybe_clear_stale_engagement(
     brain._ctx.clear_engagement()
 
 
-def maybe_force_lock_exit(brain: Brain, state: GameState, now: float) -> None:
-    """Force-exit a locked routine that has exceeded its max_lock_seconds budget."""
+def maybe_force_lock_exit(brain: Brain, state: GameState, now: float) -> RoutineBase | None:
+    """Force-exit a locked routine that has exceeded its max_lock_seconds budget.
+
+    Returns the routine that was force-exited, or None if no timeout occurred.
+    The caller uses this to block same-tick re-entry of the timed-out routine.
+    """
     _max_lock = 0.0
     for r in brain._rules:
         if r.routine is brain._active:
             _max_lock = r.max_lock_seconds
             break
     if _max_lock <= 0:
-        return
+        return None
     lock_dur = now - brain._active_start_time
     if lock_dur <= _max_lock:
-        return
+        return None
 
     _timed_out_name = brain._active_name
     log.warning(
@@ -266,6 +292,7 @@ def maybe_force_lock_exit(brain: Brain, state: GameState, now: float) -> None:
         _max_lock,
     )
     assert brain._active is not None
+    timed_out_routine = brain._active
     brain._active.exit(state)
     # Apply failure cooldown
     for r in brain._rules:
@@ -288,3 +315,4 @@ def maybe_force_lock_exit(brain: Brain, state: GameState, now: float) -> None:
                     _timed_out_name,
                 )
                 break
+    return timed_out_routine

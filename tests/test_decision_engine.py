@@ -1012,3 +1012,113 @@ class TestHardKillRoutine:
 
         # Cooldown applied
         assert "SLOW" in brain._cooldowns
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker enforcement in Phases 2/3/4
+# ---------------------------------------------------------------------------
+
+
+class TestCircuitBreakerInScoringPhases:
+    """Verify that circuit breakers block rules in Phases 2, 3, and 4."""
+
+    @pytest.mark.parametrize("phase", [2, 3, 4])
+    def test_circuit_breaker_blocks_rule(self, phase: int) -> None:
+        """A tripped (OPEN) breaker prevents the rule from being selected."""
+        brain = _make_brain(utility_phase=phase)
+        fallback = _StubRoutine()
+
+        brain.add_rule(
+            "FRAGILE",
+            lambda s: True,
+            _FailOnceRoutine(),
+            score_fn=lambda s: 0.9,
+            failure_cooldown=0.0,
+            breaker_max_failures=3,
+            breaker_window=300.0,
+            breaker_recovery=60.0,
+        )
+        brain.add_rule("FALLBACK", lambda s: True, fallback, score_fn=lambda s: 0.1)
+
+        state = make_game_state()
+
+        # Trip the breaker: 3 enter-FAILURE cycles
+        for _ in range(3):
+            brain.tick(state)  # enter FRAGILE
+            brain.tick(state)  # FAILURE
+
+        assert brain._breakers["FRAGILE"].state == "OPEN"
+
+        # Clear active so next tick does fresh selection
+        brain._active = None
+        brain._active_name = ""
+        brain.tick(state)
+
+        # FRAGILE is blocked; FALLBACK should be selected
+        assert brain._active_name == "FALLBACK"
+
+
+# ---------------------------------------------------------------------------
+# Score function exception handling in Phases 2/3/4
+# ---------------------------------------------------------------------------
+
+
+class TestScoreExceptionHandling:
+    """Verify that score_fn exceptions are caught in all scoring phases."""
+
+    @pytest.mark.parametrize("phase", [2, 3, 4])
+    def test_score_fn_exception_returns_zero(self, phase: int) -> None:
+        """A broken score_fn scores 0, allowing other rules to win."""
+        brain = _make_brain(utility_phase=phase)
+
+        def _broken_score(s):
+            raise RuntimeError("score explosion")
+
+        fallback = _StubRoutine()
+        brain.add_rule("BROKEN", lambda s: True, _StubRoutine(), score_fn=_broken_score)
+        brain.add_rule("FALLBACK", lambda s: True, fallback, score_fn=lambda s: 0.5)
+
+        state = make_game_state()
+        brain.tick(state)  # must NOT raise
+
+        assert brain._active_name == "FALLBACK"
+
+
+# ---------------------------------------------------------------------------
+# Condition predicate enforcement in phases 2-4
+# ---------------------------------------------------------------------------
+
+
+class TestConditionEnforcedInScoringPhases:
+    """Phases 2-4 must respect r.condition(state).
+
+    A rule whose condition returns False must never win, even if its
+    score_fn returns the highest value.  Regression test for a bug where
+    phases 2-4 only checked cooldowns and circuit breakers but not the
+    condition predicate.
+    """
+
+    @pytest.mark.parametrize("phase", [2, 3, 4])
+    def test_false_condition_never_selected(self, phase: int) -> None:
+        brain = _make_brain(utility_phase=phase)
+        blocked = _StubRoutine()
+        fallback = _StubRoutine()
+
+        brain.add_rule("BLOCKED", lambda s: False, blocked, score_fn=lambda s: 10.0)
+        brain.add_rule("FALLBACK_OK", lambda s: True, fallback, score_fn=lambda s: 0.5)
+
+        state = make_game_state()
+        brain.tick(state)
+
+        assert brain._active_name == "FALLBACK_OK"
+
+    @pytest.mark.parametrize("phase", [2, 3, 4])
+    def test_all_false_conditions_yields_no_selection(self, phase: int) -> None:
+        brain = _make_brain(utility_phase=phase)
+        brain.add_rule("A", lambda s: False, _StubRoutine(), score_fn=lambda s: 5.0)
+        brain.add_rule("B", lambda s: False, _StubRoutine(), score_fn=lambda s: 3.0)
+
+        state = make_game_state()
+        brain.tick(state)
+
+        assert brain._active_name is None or brain._active_name == ""

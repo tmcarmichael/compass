@@ -33,8 +33,7 @@ def _linear_camp(**overrides) -> CampConfig:
 
 def _circular_camp(**overrides) -> CampConfig:
     defaults = dict(
-        camp_x=500.0,
-        camp_y=500.0,
+        camp_pos=Point(500.0, 500.0, 0.0),
         roam_radius=250.0,
     )
     defaults.update(overrides)
@@ -94,8 +93,7 @@ class TestDistanceToCampLinear:
         camp = CampConfig(
             camp_type=CampType.LINEAR,
             patrol_waypoints=[Point(0.0, 0.0, 0.0)],
-            camp_x=100.0,
-            camp_y=100.0,
+            camp_pos=Point(100.0, 100.0, 0.0),
         )
         state = make_game_state(x=0.0, y=0.0)
         d = camp.distance_to_camp(state)
@@ -147,8 +145,7 @@ class TestEffectiveCampDistance:
         camp = CampConfig(
             camp_type=CampType.LINEAR,
             patrol_waypoints=[Point(0.0, 0.0, 0.0)],
-            camp_x=100.0,
-            camp_y=0.0,
+            camp_pos=Point(100.0, 0.0, 0.0),
         )
         d = camp.effective_camp_distance(Point(0.0, 0.0, 0.0))
         # Falls back to circular: distance_2d(0,0,100,0) = 100
@@ -210,8 +207,7 @@ class TestNearestPointOnPath:
         camp = CampConfig(
             camp_type=CampType.LINEAR,
             patrol_waypoints=[Point(0.0, 0.0, 0.0)],
-            camp_x=42.0,
-            camp_y=99.0,
+            camp_pos=Point(42.0, 99.0, 0.0),
         )
         assert camp.nearest_point_on_path(Point(0.0, 0.0, 0.0)) == Point(42.0, 99.0, 0.0)
 
@@ -253,8 +249,7 @@ class TestPointAlongPath:
     def test_fewer_than_two_waypoints(self) -> None:
         camp = CampConfig(
             patrol_waypoints=[Point(42.0, 99.0, 0.0)],
-            camp_x=10.0,
-            camp_y=20.0,
+            camp_pos=Point(10.0, 20.0, 0.0),
         )
         pt = camp.point_along_path(0.5)
         assert pt == Point(10.0, 20.0, 0.0)

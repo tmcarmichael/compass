@@ -81,7 +81,7 @@ class EngageAddRoutine(RoutineBase):
         is_new_add = self._ctx.combat.pull_target_id and add.spawn_id != self._ctx.combat.pull_target_id
 
         # Face the add
-        exact = heading_to(state.x, state.y, add.x, add.y)
+        exact = heading_to(state.pos, add.pos)
         jittered = (exact + random.gauss(0, 5.0)) % 512.0
         rsf = self._read_state_fn
         assert rsf is not None

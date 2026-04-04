@@ -484,6 +484,11 @@ class GOAPPlanner:
         counter = 1
         visited = 0
 
+        # Best g-cost seen per state.  PlanWorldState is frozen/hashable,
+        # so equivalent states reached via different action orderings are
+        # detected and the worse path is pruned.
+        best_g: dict[PlanWorldState, float] = {start: 0.0}
+
         while open_list:
             if visited >= MAX_SEARCH_NODES:
                 log.log(VERBOSE, "[GOAP] Search exhausted: %d nodes", visited)
@@ -493,6 +498,11 @@ class GOAPPlanner:
                 break
 
             _, _, node = heapq.heappop(open_list)
+
+            # Skip if we already expanded this state at equal or lower cost.
+            prev = best_g.get(node.state)
+            if prev is not None and node.g_cost > prev:
+                continue
             visited += 1
 
             # Goal test: deterministic satisfaction check
@@ -542,8 +552,14 @@ class GOAPPlanner:
 
                 new_state = action.apply_effects(node.state)
                 new_cost = node.g_cost + self.get_corrected_cost(action, ctx)
-                new_actions = node.actions + [action]
 
+                # Prune if we already reached this state at equal or lower cost.
+                prev_best = best_g.get(new_state)
+                if prev_best is not None and new_cost >= prev_best:
+                    continue
+                best_g[new_state] = new_cost
+
+                new_actions = node.actions + [action]
                 child = _Node(
                     state=new_state,
                     g_cost=new_cost,

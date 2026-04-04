@@ -72,9 +72,7 @@ def build_world_state(state: GameState, ctx: AgentContext) -> PlanWorldState:
     # At camp
     at_camp = True
     if ctx.camp.roam_radius > 0:
-        from core.types import Point
-
-        d = state.pos.dist_to(Point(ctx.camp.camp_x, ctx.camp.camp_y, 0.0))
+        d = state.pos.dist_to(ctx.camp.camp_pos)
         at_camp = d <= ctx.camp.roam_radius * 1.2  # slight buffer
 
     return PlanWorldState(

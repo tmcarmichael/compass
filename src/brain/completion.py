@@ -34,7 +34,22 @@ def tick_active_routine(brain: Brain, state: GameState, now: float) -> None:
 
     rt0 = brain.perf_clock()
     brain._active._tick_deadline = rt0 + 0.200  # 200ms cooperative budget
-    status = brain._active.tick(state)
+    try:
+        status = brain._active.tick(state)
+    except Exception as exc:
+        brain.routine_tick_ms = (brain.perf_clock() - rt0) * 1000
+        brain._ticked_routine_name = brain._active_name
+        log.warning(
+            "[DECISION] Routine %s tick() raised %s -- treating as FAILURE",
+            brain._active_name,
+            exc,
+        )
+        brain._active.failure_reason = f"tick_exception: {exc}"
+        from core.types import FailureCategory as _FC
+
+        brain._active.failure_category = _FC.EXECUTION
+        handle_routine_completion(brain, state, RoutineStatus.FAILURE, now)
+        return
     brain.routine_tick_ms = (brain.perf_clock() - rt0) * 1000
 
     # Capture name before completion/hard-kill clears it (for profiling)

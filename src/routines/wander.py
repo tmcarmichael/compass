@@ -246,9 +246,7 @@ class WanderRoutine(RoutineBase):
         else:
             ns = state
         actual = Point(self._walk_origin_x, self._walk_origin_y, 0.0).dist_to(ns.pos)
-        new_guard_dist = (
-            ns.pos.dist_to(Point(self._ctx.camp.guard_x, self._ctx.camp.guard_y, 0.0)) if self._ctx else 0
-        )
+        new_guard_dist = ns.pos.dist_to(self._ctx.camp.guard_pos) if self._ctx else 0
         log.info(
             "[POSITION] Wander: walk %s  -  now at (%.0f, %.0f) walked=%.0f guard_dist=%.0f",
             "arrived" if result else "stopped_early",
@@ -420,7 +418,7 @@ class WanderRoutine(RoutineBase):
             return self._direction_escalation(state, acq_fails, guard_dist, hunt_max)
         if guard_dist < hunt_min:
             assert self._ctx is not None
-            angle = math.atan2(state.y - self._ctx.camp.guard_y, state.x - self._ctx.camp.guard_x)
+            angle = math.atan2(state.y - self._ctx.camp.guard_pos.y, state.x - self._ctx.camp.guard_pos.x)
             angle += random.gauss(0, 0.5)
             log.info(
                 "[POSITION] Wander: too close to center (%.0f < %.0f)  -  walking into hunting zone",
@@ -430,7 +428,7 @@ class WanderRoutine(RoutineBase):
             return angle
         if guard_dist > hunt_max:
             assert self._ctx is not None
-            angle = math.atan2(self._ctx.camp.guard_y - state.y, self._ctx.camp.guard_x - state.x)
+            angle = math.atan2(self._ctx.camp.guard_pos.y - state.y, self._ctx.camp.guard_pos.x - state.x)
             angle += random.gauss(0, 0.5)
             log.info(
                 "[POSITION] Wander: beyond hunting zone (%.0f > %.0f)  -  walking back", guard_dist, hunt_max
@@ -486,7 +484,7 @@ class WanderRoutine(RoutineBase):
             return unexplored + random.gauss(0, 0.4)
         if guard_dist > hunt_max * 0.6:
             assert self._ctx is not None
-            angle = math.atan2(self._ctx.camp.guard_y - state.y, self._ctx.camp.guard_x - state.x)
+            angle = math.atan2(self._ctx.camp.guard_pos.y - state.y, self._ctx.camp.guard_pos.x - state.x)
             angle += random.gauss(0, 0.8)
             log.info(
                 "[POSITION] Wander: ESCALATION  -  %d acquire failures, drifting toward camp (dist=%.0f)",
@@ -675,16 +673,18 @@ class WanderRoutine(RoutineBase):
         # Clamp destination within hunting zone (guard distance band)
         # Also check guard proximity at destination -- prevents walking
         # past guards when chasing resource npcs in their direction.
-        dest_guard_dist = Point(target_x, target_y, 0.0).dist_to(
-            Point(self._ctx.camp.guard_x, self._ctx.camp.guard_y, 0.0)
-        )
+        dest_guard_dist = Point(target_x, target_y, 0.0).dist_to(self._ctx.camp.guard_pos)
         if dest_guard_dist > hunt_max:
-            angle_to_guards = math.atan2(self._ctx.camp.guard_y - state.y, self._ctx.camp.guard_x - state.x)
+            angle_to_guards = math.atan2(
+                self._ctx.camp.guard_pos.y - state.y, self._ctx.camp.guard_pos.x - state.x
+            )
             angle = angle_to_guards + random.uniform(-0.5, 0.5)
             target_x = state.x + dist * math.cos(angle)
             target_y = state.y + dist * math.sin(angle)
         elif dest_guard_dist < hunt_min:
-            angle_from_guards = math.atan2(state.y - self._ctx.camp.guard_y, state.x - self._ctx.camp.guard_x)
+            angle_from_guards = math.atan2(
+                state.y - self._ctx.camp.guard_pos.y, state.x - self._ctx.camp.guard_pos.x
+            )
             angle = angle_from_guards + random.uniform(-0.5, 0.5)
             target_x = state.x + dist * math.cos(angle)
             target_y = state.y + dist * math.sin(angle)
@@ -752,7 +752,7 @@ class WanderRoutine(RoutineBase):
                 continue
 
             # Endpoint walkable -- verify A* can actually reach it
-            path = terrain.find_path(state.x, state.y, target_x, target_y, jitter=0)
+            path = terrain.find_path(state.pos, Point(target_x, target_y, state.z), jitter=0)
             if path is not None:
                 return (target_x, target_y)
 
@@ -767,7 +767,7 @@ class WanderRoutine(RoutineBase):
         target_x = state.x + dist * math.cos(angle)
         target_y = state.y + dist * math.sin(angle)
         if terrain.is_walkable(target_x, target_y):
-            path = terrain.find_path(state.x, state.y, target_x, target_y, jitter=0)
+            path = terrain.find_path(state.pos, Point(target_x, target_y, state.z), jitter=0)
             if path is not None:
                 log.log(VERBOSE, "[POSITION] Wander: short walk fallback to (%.0f,%.0f)", target_x, target_y)
                 return (target_x, target_y)
@@ -802,7 +802,7 @@ class WanderRoutine(RoutineBase):
         hunt_max = self._ctx.camp.hunt_max_dist if self._ctx else DEFAULT_HUNT_MAX
         guard_dist = 9999.0
         if self._ctx:
-            guard_dist = state.pos.dist_to(Point(self._ctx.camp.guard_x, self._ctx.camp.guard_y, 0.0))
+            guard_dist = state.pos.dist_to(self._ctx.camp.guard_pos)
         outside_zone = guard_dist < hunt_min or guard_dist > hunt_max
 
         # Phase 1b: Movement in progress (non-blocking continuation)

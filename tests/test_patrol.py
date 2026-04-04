@@ -43,9 +43,9 @@ def _make_profile(
     return SimpleNamespace(is_patrolling=is_patrolling, is_threat=is_threat, spawn=spawn)
 
 
-def _make_tracker(vx: float = 0.0, vy: float = 0.0) -> MagicMock:
+def _make_tracker(vx: float = 0.0, vy: float = 0.0, vz: float = 0.0) -> MagicMock:
     tracker = MagicMock()
-    tracker.velocity.return_value = (vx, vy)
+    tracker.velocity.return_value = (vx, vy, vz)
     return tracker
 
 

@@ -20,10 +20,14 @@ from routines.rest import RestRoutine
 
 if TYPE_CHECKING:
     from brain.context import AgentContext
+    from brain.context_views import SurvivalView
     from brain.decision import Brain
     from brain.world.model import WorldModel
     from core.types import ReadStateFn
     from eq.loadout import Spell
+
+# Helper functions are typed against SurvivalView to enforce that survival
+# rules only access the subset of AgentContext they need.  See context_views.py.
 
 log = logging.getLogger(__name__)
 _skip = SkipLog(log)
@@ -44,7 +48,7 @@ FLEE_URGENCY_ENTER = 0.65  # start fleeing at this urgency
 FLEE_URGENCY_EXIT = 0.35  # stop fleeing below this
 
 
-def _check_core_safety_floors(ctx: AgentContext, state: GameState, label: str) -> bool | None:
+def _check_core_safety_floors(ctx: SurvivalView, state: GameState, label: str) -> bool | None:
     """Check the three core safety floors shared by FLEE and FEIGN_DEATH.
 
     Returns True if a floor is triggered, None if no floor fires.
@@ -78,7 +82,7 @@ def _fight_winnable(state: GameState) -> bool:
     return winnable
 
 
-def _count_damaged_npcs(ctx: AgentContext, state: GameState) -> int:
+def _count_damaged_npcs(ctx: SurvivalView, state: GameState) -> int:
     """Count damaged NPCs within 40u (for add detection)."""
     from brain.rules.skip_log import damaged_npcs_near
 
@@ -104,14 +108,14 @@ def _urgency_hp(hp_pct: float) -> float:
     return result
 
 
-def _urgency_pet_died(ctx: AgentContext, state: GameState, in_combat: bool) -> float:
+def _urgency_pet_died(ctx: SurvivalView, state: GameState, in_combat: bool) -> float:
     """Pet died mid-combat with unwinnable fight: +0.4."""
     if in_combat and ctx.pet.just_died() and not _fight_winnable(state):
         return 0.4
     return 0.0
 
 
-def _urgency_adds(ctx: AgentContext, state: GameState, in_combat: bool) -> float:
+def _urgency_adds(ctx: SurvivalView, state: GameState, in_combat: bool) -> float:
     """Extra damaged NPCs nearby: +0.15 per add."""
     if not in_combat:
         return 0.0
@@ -128,7 +132,7 @@ def _urgency_target_dying(state: GameState) -> float:
     return 0.0
 
 
-def _urgency_learned_danger(ctx: AgentContext, in_combat: bool) -> float:
+def _urgency_learned_danger(ctx: SurvivalView, in_combat: bool) -> float:
     """Learned danger from FightHistory (>0.7): +0.2."""
     fh = ctx.fight_history
     if not fh or not in_combat:
@@ -140,7 +144,7 @@ def _urgency_learned_danger(ctx: AgentContext, in_combat: bool) -> float:
     return 0.2 if danger is not None and danger > 0.7 else 0.0
 
 
-def _urgency_pet_hp_low(ctx: AgentContext) -> float:
+def _urgency_pet_hp_low(ctx: SurvivalView) -> float:
     """Pet HP below 30%: +0.1."""
     world = ctx.world
     if ctx.pet.alive and world:
@@ -150,21 +154,21 @@ def _urgency_pet_hp_low(ctx: AgentContext) -> float:
     return 0.0
 
 
-def _urgency_red_threat(ctx: AgentContext) -> float:
+def _urgency_red_threat(ctx: SurvivalView) -> float:
     """RED imminent threat: +0.5."""
     if ctx.threat.imminent_threat and ctx.threat.imminent_threat_con == "red":
         return 0.5
     return 0.0
 
 
-def _urgency_mob_on_player(ctx: AgentContext, state: GameState) -> float:
+def _urgency_mob_on_player(ctx: SurvivalView, state: GameState) -> float:
     """No pet + NPC attacking player: +0.5."""
     if not ctx.pet.alive and not ctx.combat.engaged and _mob_attacking_player(state):
         return 0.5
     return 0.0
 
 
-def compute_flee_urgency(ctx: AgentContext, state: GameState) -> float:
+def compute_flee_urgency(ctx: SurvivalView, state: GameState) -> float:
     """Composite flee urgency score (0.0 = safe, 1.0 = critical).
 
     Eight axes contribute additively, then clamp to [0, 1].
@@ -204,7 +208,7 @@ def compute_flee_urgency(ctx: AgentContext, state: GameState) -> float:
     return result
 
 
-def _next_pull_mana_estimate(ctx: AgentContext) -> int | None:
+def _next_pull_mana_estimate(ctx: SurvivalView) -> int | None:
     """Estimate mana cost for next pull from FightHistory.
 
     Returns average learned mana cost across all learned npc types,
@@ -224,12 +228,12 @@ def _next_pull_mana_estimate(ctx: AgentContext) -> int | None:
     return int(sum(costs) / len(costs))
 
 
-def reset_flee_hysteresis(ctx: AgentContext) -> None:
+def reset_flee_hysteresis(ctx: SurvivalView) -> None:
     """Reset flee hysteresis state on ctx.combat (for testing)."""
     ctx.combat.flee_urgency_active = False
 
 
-def _flee_safety_floors(ctx: AgentContext, state: GameState) -> bool:
+def _flee_safety_floors(ctx: SurvivalView, state: GameState) -> bool:
     """Binary safety floors that always fire regardless of urgency score.
 
     These are structural guarantees: the agent cannot learn its way out
@@ -274,7 +278,7 @@ def _flee_safety_floors(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def flee_condition(ctx: AgentContext, state: GameState) -> bool:
+def flee_condition(ctx: SurvivalView, state: GameState) -> bool:
     """Standalone flee condition: urgency hysteresis + binary safety floors.
 
     Used by tests and can be called outside of the brain rule system.
@@ -304,7 +308,7 @@ def flee_condition(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def feign_death_condition(ctx: AgentContext, state: GameState, fd_spell: Spell | None = None) -> bool:
+def feign_death_condition(ctx: SurvivalView, state: GameState, fd_spell: Spell | None = None) -> bool:
     """Standalone feign death condition.
 
     Check if FD should trigger. Conditions:
@@ -335,7 +339,7 @@ def feign_death_condition(ctx: AgentContext, state: GameState, fd_spell: Spell |
 
 
 def rest_needs_check(
-    ctx: AgentContext, state: GameState, world: WorldModel | None = None
+    ctx: SurvivalView, state: GameState, world: WorldModel | None = None
 ) -> tuple[bool, bool, bool]:
     """Check if rest is needed -- returns (hp_low, mana_low, pet_low).
 
@@ -373,7 +377,7 @@ def rest_needs_check(
 # -- Module-level extracted condition/score functions --
 
 
-def _should_death_recover(state: GameState, ctx: AgentContext) -> bool:
+def _should_death_recover(state: GameState, ctx: SurvivalView) -> bool:
     if not ctx.player.dead:
         _skip("DeathRecovery", "not dead")
         return False
@@ -381,13 +385,13 @@ def _should_death_recover(state: GameState, ctx: AgentContext) -> bool:
     return should
 
 
-def _score_death_recovery(state: GameState, ctx: AgentContext) -> float:
+def _score_death_recovery(state: GameState, ctx: SurvivalView) -> float:
     if not ctx.player.dead:
         return 0.0
     return 1.0 if flags.should_recover_death(ctx.player.deaths) else 0.0
 
 
-def _should_feign_death(state: GameState, ctx: AgentContext) -> bool:
+def _should_feign_death(state: GameState, ctx: SurvivalView) -> bool:
     if not flags.flee:
         _skip("FeignDeath", "flee disabled")
         return False
@@ -405,7 +409,7 @@ def _should_feign_death(state: GameState, ctx: AgentContext) -> bool:
     return False
 
 
-def _score_feign_death(state: GameState, ctx: AgentContext) -> float:
+def _score_feign_death(state: GameState, ctx: SurvivalView) -> float:
     if not flags.flee:
         return 0.0
     fd_spell = get_spell_by_role(SpellRole.UTILITY)
@@ -424,7 +428,7 @@ def _score_feign_death(state: GameState, ctx: AgentContext) -> float:
     return 0.0
 
 
-def _should_flee(state: GameState, ctx: AgentContext) -> bool:
+def _should_flee(state: GameState, ctx: SurvivalView) -> bool:
     if not flags.flee:
         ctx.combat.flee_urgency_active = False
         _skip("Flee", "flee disabled")
@@ -435,7 +439,7 @@ def _should_flee(state: GameState, ctx: AgentContext) -> bool:
     return result
 
 
-def _score_flee(state: GameState, ctx: AgentContext) -> float:
+def _score_flee(state: GameState, ctx: SurvivalView) -> float:
     if not flags.flee:
         return 0.0
     if _flee_safety_floors(ctx, state):
@@ -447,7 +451,7 @@ def _score_flee(state: GameState, ctx: AgentContext) -> float:
     return urgency if urgency >= FLEE_URGENCY_ENTER else 0.0
 
 
-def _in_combat_dot_suppresses_rest(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState) -> bool:
+def _in_combat_dot_suppresses_rest(ctx: SurvivalView, state: GameState, rs: _SurvivalRuleState) -> bool:
     """Handle in_combat flag when not engaged (likely DoT/lich buff ticks).
 
     Returns True to suppress rest, False to allow it through.
@@ -472,7 +476,7 @@ def _in_combat_dot_suppresses_rest(ctx: AgentContext, state: GameState, rs: _Sur
     return False
 
 
-def _rest_hp_dropping(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState) -> bool:
+def _rest_hp_dropping(ctx: SurvivalView, state: GameState, rs: _SurvivalRuleState) -> bool:
     """Return True if HP is dropping while resting (possible attack)."""
     if not (rs.resting and ctx.player.rest_start_time > 0):
         return False
@@ -488,7 +492,7 @@ def _rest_hp_dropping(ctx: AgentContext, state: GameState, rs: _SurvivalRuleStat
     return False
 
 
-def _rest_suppressed(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState) -> bool:
+def _rest_suppressed(ctx: SurvivalView, state: GameState, rs: _SurvivalRuleState) -> bool:
     """Return True if rest should be suppressed (disabled, combat, threats, etc.)."""
     if not flags.rest:
         rs.resting = False
@@ -549,7 +553,7 @@ def _rest_suppressed(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState
     return False
 
 
-def _rest_exit_check(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState) -> bool:
+def _rest_exit_check(ctx: SurvivalView, state: GameState, rs: _SurvivalRuleState) -> bool:
     """Check if rest thresholds are met and we should exit rest.
 
     Returns True if rest should end (thresholds met), False to keep resting.
@@ -597,7 +601,7 @@ def _rest_exit_check(ctx: AgentContext, state: GameState, rs: _SurvivalRuleState
 
 def _should_rest(
     state: GameState,
-    ctx: AgentContext,
+    ctx: SurvivalView,
     rs: _SurvivalRuleState,
 ) -> bool:
     if _rest_suppressed(ctx, state, rs):
@@ -623,7 +627,7 @@ def _should_rest(
     return rs.resting
 
 
-def _score_rest(state: GameState, ctx: AgentContext) -> float:
+def _score_rest(state: GameState, ctx: SurvivalView) -> float:
     if not flags.rest:
         return 0.0
     if ctx.in_active_combat:
@@ -637,7 +641,7 @@ def _score_rest(state: GameState, ctx: AgentContext) -> float:
 
 def _should_evade(
     state: GameState,
-    ctx: AgentContext,
+    ctx: SurvivalView,
     rs: _SurvivalRuleState,
 ) -> bool:
     if ctx.combat.engaged:
@@ -661,7 +665,7 @@ def _should_evade(
     return False
 
 
-def _score_evade(state: GameState, ctx: AgentContext) -> float:
+def _score_evade(state: GameState, ctx: SurvivalView) -> float:
     if ctx.combat.engaged:
         return 0.0
     return 1.0 if ctx.threat.evasion_point is not None else 0.0

@@ -1,7 +1,8 @@
-"""Utility scoring selection methods (Phases 1-4).
+"""Utility scoring selection methods (Phases 0-4).
 
 Extracted from Brain to keep the decision engine focused on coordination.
-Each function takes the Brain instance and delegates to its internal state.
+Each phase implements the PhaseSelector protocol and is chosen at init time
+via build_phase_selector(), replacing the if/elif dispatch chain.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from brain.phase_modifiers import get_phase_modifier
 from brain.rule_def import RuleDef, score_from_considerations
@@ -20,6 +21,28 @@ if TYPE_CHECKING:
     from perception.state import GameState
 
 log = logging.getLogger(__name__)
+
+# -- Type alias for the common return shape of all phase selectors --
+_SelectResult = tuple[RoutineBase | None, str, bool]
+
+
+class PhaseSelector(Protocol):
+    """Strategy interface for rule selection phases.
+
+    Each phase implements select() with the same signature so the Brain
+    can dispatch without knowing which phase is active.
+    """
+
+    def select(
+        self,
+        brain: Brain,
+        state: GameState,
+        now: float,
+        rule_eval: dict[str, str],
+        diag_results: list[str],
+        rule_times: dict[str, float],
+    ) -> _SelectResult: ...
+
 
 # Score multiplier applied when GOAP planner suggests a specific action
 GOAP_BOOST = 1.5
@@ -45,6 +68,68 @@ def _apply_modifiers(score: float, phase: str, rule_name: str, goap_hint: str) -
     return score
 
 
+def _is_rule_blocked(
+    brain: Brain,
+    r: RuleDef,
+    state: GameState,
+    now: float,
+    rule_eval: dict,
+    diag_results: list,
+    rule_times: dict,
+) -> bool:
+    """Check condition, cooldown, and circuit breaker.  Returns True if
+    rule should be skipped.
+
+    Shared by Phases 2/3/4 to avoid duplicating eligibility logic.
+    The condition check is critical: without it, a rule whose predicate
+    returns False (e.g. ACQUIRE when suppressed by hard gates) could
+    still win selection based on its utility score alone.
+    """
+    if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
+        remaining = brain._cooldowns[r.name] - now
+        rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
+        diag_results.append(f"{r.name}=CD")
+        rule_times[r.name] = 0.0
+        return True
+    breaker = brain._breakers.get(r.name)
+    if breaker and not breaker.allow():
+        rule_eval[r.name] = "OPEN"
+        diag_results.append(f"{r.name}=OPEN")
+        rule_times[r.name] = 0.0
+        return True
+    try:
+        cond = r.condition(state)
+    except Exception as exc:
+        log.warning("[DECISION] Rule %s condition raised %s -- skipping", r.name, exc)
+        rule_eval[r.name] = "ERROR"
+        diag_results.append(f"{r.name}=ERROR")
+        rule_times[r.name] = 0.0
+        return True
+    if not cond:
+        rule_eval[r.name] = "cond=F"
+        diag_results.append(f"{r.name}=cond_F")
+        rule_times[r.name] = 0.0
+        return True
+    return False
+
+
+def _safe_score(fn: object, *args: object) -> float:
+    """Call a scoring function, returning 0.0 on any exception.
+
+    Logs at WARNING so failures are visible but don't crash the tick.
+    """
+    try:
+        result: float = fn(*args)  # type: ignore[operator]
+        return result
+    except Exception:
+        log.warning(
+            "[DECISION] Score function %s raised, defaulting to 0.0",
+            getattr(fn, "__name__", fn),
+            exc_info=True,
+        )
+        return 0.0
+
+
 def compute_divergence(brain: Brain, state: GameState, now: float, binary_winner: str) -> None:
     """Phase 1: compute scores for all rules, log when score-based
     selection would differ from binary selection."""
@@ -56,10 +141,19 @@ def compute_divergence(brain: Brain, state: GameState, now: float, binary_winner
         if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
             scores[r.name] = -1.0  # on cooldown
             continue
+        breaker = brain._breakers.get(r.name)
+        if breaker and not breaker.allow():
+            scores[r.name] = -2.0  # circuit-broken
+            continue
+        # Check condition so telemetry doesn't report ineligible "winners"
         try:
-            s = r.score_fn(state)
+            if not r.condition(state):
+                scores[r.name] = -3.0  # condition false
+                continue
         except Exception:
-            s = 0.0
+            scores[r.name] = -4.0  # condition error
+            continue
+        s = _safe_score(r.score_fn, state)
         scores[r.name] = s
         if s > best_score:
             best_score = s
@@ -89,11 +183,7 @@ def select_by_tier(
     tier_groups: dict[int, list[RuleDef]] = defaultdict(list)
 
     for r in brain._rules:
-        if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
-            remaining = brain._cooldowns[r.name] - now
-            rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
-            diag_results.append(f"{r.name}=CD")
-            rule_times[r.name] = 0.0
+        if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):
             continue
         tier_groups[r.tier].append(r)
 
@@ -103,7 +193,7 @@ def select_by_tier(
         scored: list[tuple[float, RuleDef]] = []
         for r in tier_groups[tier]:
             t0 = time.perf_counter()
-            s = _apply_modifiers(r.score_fn(state), phase, r.name, goap_hint)
+            s = _apply_modifiers(_safe_score(r.score_fn, state), phase, r.name, goap_hint)
             rule_times[r.name] = (time.perf_counter() - t0) * 1000
             rule_eval[r.name] = f"{s:.2f}" if s > 0 else "0"
             diag_results.append(f"{r.name}={s:.2f}")
@@ -128,14 +218,10 @@ def select_weighted(
     phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
-        if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
-            remaining = brain._cooldowns[r.name] - now
-            rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
-            diag_results.append(f"{r.name}=CD")
-            rule_times[r.name] = 0.0
+        if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):
             continue
         t0 = time.perf_counter()
-        s = _apply_modifiers(r.score_fn(state), phase, r.name, goap_hint)
+        s = _apply_modifiers(_safe_score(r.score_fn, state), phase, r.name, goap_hint)
         rule_times[r.name] = (time.perf_counter() - t0) * 1000
         weighted = r.weight * s
         rule_eval[r.name] = f"{weighted:.1f}" if s > 0 else "0"
@@ -173,18 +259,14 @@ def select_with_considerations(
     phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
-        if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
-            remaining = brain._cooldowns[r.name] - now
-            rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
-            diag_results.append(f"{r.name}=CD")
-            rule_times[r.name] = 0.0
+        if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):
             continue
         t0 = time.perf_counter()
         # Phase 4: prefer considerations over score_fn when defined
         if r.considerations and brain._ctx:
-            raw = score_from_considerations(r.considerations, state, brain._ctx)
+            raw = _safe_score(score_from_considerations, r.considerations, state, brain._ctx)
         else:
-            raw = r.score_fn(state)
+            raw = _safe_score(r.score_fn, state)
         s = _apply_modifiers(raw, phase, r.name, goap_hint)
         rule_times[r.name] = (time.perf_counter() - t0) * 1000
         weighted = r.weight * s
@@ -205,3 +287,136 @@ def select_with_considerations(
         return best.routine, best.name, best.emergency
 
     return None, "", False
+
+
+# =====================================================================
+# Phase selector implementations
+# =====================================================================
+
+
+def select_binary(
+    brain: Brain,
+    state: GameState,
+    now: float,
+    rule_eval: dict[str, str],
+    diag_results: list[str],
+    rule_times: dict[str, float],
+) -> _SelectResult:
+    """Phase 0/1: binary conditions, insertion-order priority.
+
+    Short-circuits after winner found: skips condition evaluation for
+    lower-priority rules. This is safe because detection logic (threat
+    scan, add detection) runs pre-rule in the tick pipeline, not inside
+    condition functions.
+    """
+    selected: RoutineBase | None = None
+    selected_name = ""
+    selected_emergency = False
+
+    for r in brain._rules:
+        if r.name in brain._cooldowns and now < brain._cooldowns[r.name]:
+            remaining = brain._cooldowns[r.name] - now
+            rule_eval[r.name] = f"cooldown({remaining:.0f}s)"
+            diag_results.append(f"{r.name}=CD")
+            rule_times[r.name] = 0.0
+            continue
+        breaker = brain._breakers.get(r.name)
+        if breaker and not breaker.allow():
+            rule_eval[r.name] = "OPEN"
+            diag_results.append(f"{r.name}=OPEN")
+            rule_times[r.name] = 0.0
+            continue
+        if selected is not None:
+            rule_eval[r.name] = "skip"
+            diag_results.append(f"{r.name}=skip")
+            rule_times[r.name] = 0.0
+            continue
+        t0 = brain.perf_clock()
+        try:
+            matched = r.condition(state)
+        except Exception as exc:
+            rule_times[r.name] = (brain.perf_clock() - t0) * 1000
+            rule_eval[r.name] = "ERROR"
+            diag_results.append(f"{r.name}=ERROR")
+            log.warning("[DECISION] Rule %s condition raised %s -- skipping", r.name, exc)
+            continue
+        rule_times[r.name] = (brain.perf_clock() - t0) * 1000
+        rule_eval[r.name] = "YES" if matched else "no"
+        diag_results.append(f"{r.name}={'YES' if matched else 'no'}")
+        if matched:
+            selected = r.routine
+            selected_name = r.name
+            selected_emergency = r.emergency
+
+    return selected, selected_name, selected_emergency
+
+
+class BinarySelector:
+    """Phase 0/1: binary condition evaluation, insertion-order priority."""
+
+    def select(
+        self,
+        brain: Brain,
+        state: GameState,
+        now: float,
+        rule_eval: dict[str, str],
+        diag_results: list[str],
+        rule_times: dict[str, float],
+    ) -> _SelectResult:
+        return select_binary(brain, state, now, rule_eval, diag_results, rule_times)
+
+
+class TierSelector:
+    """Phase 2: score-based selection within priority tiers."""
+
+    def select(
+        self,
+        brain: Brain,
+        state: GameState,
+        now: float,
+        rule_eval: dict[str, str],
+        diag_results: list[str],
+        rule_times: dict[str, float],
+    ) -> _SelectResult:
+        return select_by_tier(brain, state, now, rule_eval, diag_results, rule_times)
+
+
+class WeightedSelector:
+    """Phase 3: weighted cross-tier scoring."""
+
+    def select(
+        self,
+        brain: Brain,
+        state: GameState,
+        now: float,
+        rule_eval: dict[str, str],
+        diag_results: list[str],
+        rule_times: dict[str, float],
+    ) -> _SelectResult:
+        return select_weighted(brain, state, now, rule_eval, diag_results, rule_times)
+
+
+class ConsiderationSelector:
+    """Phase 4: consideration-based scoring with weighted geometric mean."""
+
+    def select(
+        self,
+        brain: Brain,
+        state: GameState,
+        now: float,
+        rule_eval: dict[str, str],
+        diag_results: list[str],
+        rule_times: dict[str, float],
+    ) -> _SelectResult:
+        return select_with_considerations(brain, state, now, rule_eval, diag_results, rule_times)
+
+
+def build_phase_selector(phase: int) -> PhaseSelector:
+    """Factory: return the appropriate selector for a utility phase level."""
+    if phase >= 4:
+        return ConsiderationSelector()
+    if phase >= 3:
+        return WeightedSelector()
+    if phase >= 2:
+        return TierSelector()
+    return BinarySelector()

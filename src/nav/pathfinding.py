@@ -61,7 +61,7 @@ def _validate_endpoints(
 
     snap_radius = max(10, int(100.0 / terrain.cell_size))
     if not _cell_walkable(terrain, sc, sr, near_z):
-        snapped = _snap_to_walkable(terrain, sc, sr, radius=snap_radius)
+        snapped = _snap_to_walkable(terrain, sc, sr, radius=snap_radius, near_z=near_z)
         if snapped:
             sc, sr = snapped
         else:
@@ -69,7 +69,7 @@ def _validate_endpoints(
             return None
 
     if not _cell_walkable(terrain, gc, gr, near_z):
-        snapped = _snap_to_walkable(terrain, gc, gr, radius=snap_radius)
+        snapped = _snap_to_walkable(terrain, gc, gr, radius=snap_radius, near_z=near_z)
         if snapped:
             gc, gr = snapped
         else:
@@ -125,13 +125,10 @@ def _log_path_found(
 
 def find_path(
     terrain: ZoneTerrain,
-    start_x: float,
-    start_y: float,
-    goal_x: float,
-    goal_y: float,
+    start: Point,
+    goal: Point,
     max_nodes: int = 50000,
     jitter: float = 3.0,
-    near_z: float = float("nan"),
 ) -> list[Point] | None:
     """Find a path using Jump Point Search (JPS) on the terrain grid.
 
@@ -145,8 +142,8 @@ def find_path(
 
     Args:
         terrain: ZoneTerrain instance with loaded heightmap.
-        start_x, start_y: Start position in game coordinates.
-        goal_x, goal_y: Goal position in game coordinates.
+        start: Start position as Point (x, y, z in game coordinates).
+        goal: Goal position as Point (x, y, z in game coordinates).
         max_nodes: Maximum jump points to explore before giving up.
         jitter: Path humanization amount (0=straight, 12=natural).
 
@@ -155,14 +152,15 @@ def find_path(
         or None if no path exists.
     """
     t0 = time.perf_counter()
+    near_z = start.z
 
     # Scale jitter to cell_size so deviation is consistent (~1-2 cells)
     # regardless of grid resolution. 12u at 10u cells = 1.2 cells.
     jitter = jitter * min(terrain.cell_size, 10.0) / 10.0
 
     # Convert game coords to grid cells
-    sc, sr = terrain._game_to_grid(start_x, start_y)
-    gc, gr = terrain._game_to_grid(goal_x, goal_y)
+    sc, sr = terrain._game_to_grid(start.x, start.y)
+    gc, gr = terrain._game_to_grid(goal.x, goal.y)
 
     # Validate and snap endpoints to walkable cells
     endpoints = _validate_endpoints(
@@ -171,10 +169,10 @@ def find_path(
         sr,
         gc,
         gr,
-        start_x,
-        start_y,
-        goal_x,
-        goal_y,
+        start.x,
+        start.y,
+        goal.x,
+        goal.y,
         near_z,
     )
     if endpoints is None:
@@ -201,11 +199,15 @@ def find_path(
     rows = terrain._rows
     explored = 0
 
-    # Extract bitfield for hot-path (local refs = faster than attr access)
-    if not terrain._walk_bits:
-        terrain._build_walk_bits()
-    wb = terrain._walk_bits
-    wbc = terrain._walk_byte_cols
+    # Build a Z-filtered walkability bitfield so the search never routes
+    # through cells on a different vertical level (bridges, multi-floor).
+    if not math.isnan(near_z) and terrain._z_ceiling:
+        wb, wbc = terrain.build_walk_bits_z(near_z)
+    else:
+        if not terrain._walk_bits:
+            terrain._build_walk_bits()
+        wb = terrain._walk_bits
+        wbc = terrain._walk_byte_cols
 
     # All 8 directions for the start node (no parent to prune from)
     _ALL_DIRS = [
@@ -243,9 +245,11 @@ def find_path(
 
         if current == goal_node:
             path = _jps_reconstruct(came_from, current, terrain, near_z)
-            path = _simplify_path(path, terrain)
-            path = vary_path(path, terrain, jitter_range=jitter)
-            _log_path_found(path, terrain, t0, explored, start_x, start_y, goal_x, goal_y)
+            path = _simplify_path(path, terrain, wb_override=wb, wbc_override=wbc)
+            path = vary_path(
+                path, terrain, jitter_range=jitter, near_z=near_z, wb_override=wb, wbc_override=wbc
+            )
+            _log_path_found(path, terrain, t0, explored, start.x, start.y, goal.x, goal.y)
             return path
 
         current_g = g_cost.get(current, float("inf"))
@@ -285,7 +289,7 @@ def find_path(
     log.info(
         "[NAV] JPS exhausted (%d nodes in %.2fs), falling back to A*", explored, time.perf_counter() - t0
     )
-    return _find_path_astar(terrain, start_x, start_y, goal_x, goal_y, max_nodes, jitter, t0, wb, wbc, near_z)
+    return _find_path_astar(terrain, start.x, start.y, goal.x, goal.y, max_nodes, jitter, t0, wb, wbc, near_z)
 
 
 def _heuristic(c1: int, r1: int, c2: int, r2: int) -> float:
@@ -296,8 +300,13 @@ def _heuristic(c1: int, r1: int, c2: int, r2: int) -> float:
 
 
 def _cell_walkable(terrain: ZoneTerrain, col: int, row: int, near_z: float = float("nan")) -> bool:
-    """Check if a grid cell is walkable  -  uses terrain.is_walkable for
-    full override + Z-threshold support."""
+    """Check if a grid cell is walkable with Z-level filtering.
+
+    When near_z is provided (not NaN), cells on a different vertical
+    level (bridges, multi-floor buildings) are rejected. Bridge cells
+    with water/lava underneath are only walkable for agents at bridge
+    height, not ground level.
+    """
     idx = terrain._grid_idx(col, row)
     if idx < 0:
         return False
@@ -305,7 +314,25 @@ def _cell_walkable(terrain: ZoneTerrain, col: int, row: int, near_z: float = flo
     wy = terrain._min_y + row * terrain.cell_size
     game_x = wy  # WLD Y -> game X
     game_y = wx  # WLD X -> game Y
-    return bool(terrain.is_walkable(game_x, game_y))
+    if not terrain.is_walkable(game_x, game_y):
+        return False
+    if not math.isnan(near_z):
+        # Multi-level check: reject bridge cells when agent is at ground
+        # level and ground surface is hazardous (water/lava).
+        from nav.terrain.heightmap import SURFACE_BRIDGE, SURFACE_LAVA, SURFACE_WATER
+
+        f = terrain._flags[idx]
+        z_ceil = terrain.get_z_ceiling(game_x, game_y)
+        if not math.isnan(z_ceil):
+            z_ground = terrain.get_z(game_x, game_y)
+            mid = (z_ground + z_ceil) / 2.0
+            on_upper = near_z > mid
+            if not on_upper and (f & SURFACE_BRIDGE) and (f & (SURFACE_WATER | SURFACE_LAVA)):
+                return False
+        level_z = terrain.get_level_z(game_x, game_y, near_z)
+        if abs(level_z - near_z) > _WALKABLE_CLIMB:
+            return False
+    return True
 
 
 def _cell_cost(terrain: ZoneTerrain, col: int, row: int, from_col: int = -1, from_row: int = -1) -> float:
@@ -327,11 +354,13 @@ def _cell_cost(terrain: ZoneTerrain, col: int, row: int, from_col: int = -1, fro
     f = terrain._flags[idx]
     cost = _COST_STEEP if (f & 0x02) else _COST_NORMAL
 
-    # Z-gradient penalty: prefer flat terrain over hills
+    # Z-gradient penalty: prefer flat terrain; reject impassable climbs
     if from_col >= 0:
         from_idx = terrain._grid_idx(from_col, from_row)
         if from_idx >= 0:
             dz = abs(terrain._z[idx] - terrain._z[from_idx])
+            if dz > _WALKABLE_CLIMB:
+                return -1  # impassable cliff
             if dz > 3.0:
                 cost += dz * 0.3  # penalty scales with Z change
 
@@ -342,14 +371,16 @@ def _cell_cost(terrain: ZoneTerrain, col: int, row: int, from_col: int = -1, fro
     return cost
 
 
-def _snap_to_walkable(terrain: ZoneTerrain, col: int, row: int, radius: int = 5) -> tuple[int, int] | None:
-    """Find nearest walkable cell within radius."""
+def _snap_to_walkable(
+    terrain: ZoneTerrain, col: int, row: int, radius: int = 5, near_z: float = float("nan")
+) -> tuple[int, int] | None:
+    """Find nearest walkable cell within radius, respecting Z-level."""
     best = None
     best_dist = float("inf")
     for dr in range(-radius, radius + 1):
         for dc in range(-radius, radius + 1):
             nc, nr = col + dc, row + dr
-            if _cell_walkable(terrain, nc, nr):
+            if _cell_walkable(terrain, nc, nr, near_z):
                 d = dc * dc + dr * dr
                 if d < best_dist:
                     best_dist = d
@@ -389,13 +420,13 @@ def _find_path_astar(
 
     snap_radius = max(10, int(100.0 / terrain.cell_size))
     if not _bit_walkable(wb, wbc, sc, sr, cols, rows):
-        snapped = _snap_to_walkable(terrain, sc, sr, radius=snap_radius)
+        snapped = _snap_to_walkable(terrain, sc, sr, radius=snap_radius, near_z=near_z)
         if snapped:
             sc, sr = snapped
         else:
             return None
     if not _bit_walkable(wb, wbc, gc, gr, cols, rows):
-        snapped = _snap_to_walkable(terrain, gc, gr, radius=snap_radius)
+        snapped = _snap_to_walkable(terrain, gc, gr, radius=snap_radius, near_z=near_z)
         if snapped:
             gc, gr = snapped
         else:
@@ -439,8 +470,10 @@ def _find_path_astar(
 
         if cc == gc and cr == gr:
             path = _jps_reconstruct(came_from, current, terrain, near_z)
-            path = _simplify_path(path, terrain)
-            path = vary_path(path, terrain, jitter_range=jitter)
+            path = _simplify_path(path, terrain, wb_override=wb, wbc_override=wbc)
+            path = vary_path(
+                path, terrain, jitter_range=jitter, near_z=near_z, wb_override=wb, wbc_override=wbc
+            )
             elapsed = time.perf_counter() - t0
             log.info("[NAV] A* fallback: path %d waypoints, %d nodes in %.2fs", len(path), explored, elapsed)
             return path
@@ -457,6 +490,8 @@ def _find_path_astar(
                 continue
 
             cost = _fast_cell_cost(terrain, nc, nr, cc, cr)
+            if cost < 0:
+                continue  # impassable (cliff)
             step = cost * (_COST_DIAGONAL if diag else _COST_NORMAL)
             tentative_g = current_g + step
 
@@ -501,6 +536,7 @@ def _fast_cell_cost(terrain: ZoneTerrain, col: int, row: int, from_col: int, fro
 
     The JPS jump already confirmed walkability via bitfield, so we skip
     the full is_walkable() chain and read flags directly.
+    Returns -1 for impassable cliff transitions (dz > WALKABLE_CLIMB).
     """
     cols = terrain._cols
     idx = row * cols + col
@@ -509,6 +545,8 @@ def _fast_cell_cost(terrain: ZoneTerrain, col: int, row: int, from_col: int, fro
 
     from_idx = from_row * cols + from_col
     dz = abs(terrain._z[idx] - terrain._z[from_idx])
+    if dz > _WALKABLE_CLIMB:
+        return -1  # impassable cliff
     if dz > 3.0:
         cost += dz * 0.3
 
@@ -672,7 +710,10 @@ def _jps_path_cost(
     c, r = c1, r1
     while c != c2 or r != r2:
         nc, nr = c + dc, r + dr
-        total += _fast_cell_cost(terrain, nc, nr, c, r) * base
+        cell_cost = _fast_cell_cost(terrain, nc, nr, c, r)
+        if cell_cost < 0:
+            return float("inf")  # cliff along jump -- reject this path
+        total += cell_cost * base
         c, r = nc, nr
     return total
 
@@ -703,13 +744,16 @@ def _jps_reconstruct(
             r += dr
     grid_path.append(jump_path[-1])
 
-    # Convert grid cells to game coordinates with terrain Z
+    # Convert grid cells to game coordinates with level-aware Z
     waypoints: list[Point] = []
     for col, row in grid_path:
         wx = terrain._min_x + (col + 0.5) * terrain.cell_size
         wy = terrain._min_y + (row + 0.5) * terrain.cell_size
         gx, gy = wy, wx  # WLD -> game (swap)
-        _z = terrain.get_z(gx, gy)
+        if not math.isnan(near_z):
+            _z = terrain.get_level_z(gx, gy, near_z)
+        else:
+            _z = terrain.get_z(gx, gy)
         waypoints.append(Point(gx, gy, _z if _z == _z else 0.0))  # NaN guard
     return waypoints
 
@@ -732,12 +776,20 @@ def _reconstruct(
         wx = terrain._min_x + (col + 0.5) * terrain.cell_size
         wy = terrain._min_y + (row + 0.5) * terrain.cell_size
         gx, gy = wy, wx  # WLD -> game (swap back)
-        _z = terrain.get_z(gx, gy)
+        if not math.isnan(near_z):
+            _z = terrain.get_level_z(gx, gy, near_z)
+        else:
+            _z = terrain.get_z(gx, gy)
         waypoints.append(Point(gx, gy, _z if _z == _z else 0.0))
     return waypoints
 
 
-def _simplify_path(path: list[Point], terrain: ZoneTerrain) -> list[Point]:
+def _simplify_path(
+    path: list[Point],
+    terrain: ZoneTerrain,
+    wb_override: bytearray | None = None,
+    wbc_override: int | None = None,
+) -> list[Point]:
     """Two-phase path smoothing: greedy LOS + clearance-aware funnel.
 
     Phase 1 (greedy forward): scan forward from each anchor, skip
@@ -747,6 +799,9 @@ def _simplify_path(path: list[Point], terrain: ZoneTerrain) -> list[Point]:
     try the FARTHEST remaining point first (reverse scan). Prefer paths
     with clearance margin; fall back to center-only for narrow passages.
     Finds shortcuts that Phase 1 misses due to its early-break heuristic.
+
+    When *wb_override*/*wbc_override* are provided, LOS checks use the
+    Z-filtered bitfield so smoothing respects multi-level terrain.
     """
     if len(path) <= 2:
         return path
@@ -757,7 +812,9 @@ def _simplify_path(path: list[Point], terrain: ZoneTerrain) -> list[Point]:
     while i < len(path) - 1:
         best_j = i + 1
         for j in range(i + 2, len(path)):
-            if _clear_line(terrain, path[i][0], path[i][1], path[j][0], path[j][1]):
+            if _clear_line(
+                terrain, path[i][0], path[i][1], path[j][0], path[j][1], wb_override, wbc_override
+            ):
                 best_j = j
             else:
                 break
@@ -765,13 +822,15 @@ def _simplify_path(path: list[Point], terrain: ZoneTerrain) -> list[Point]:
         i = best_j
 
     # Phase 2: reverse-scan funnel with clearance
-    return _funnel_smooth(phase1, terrain)
+    return _funnel_smooth(phase1, terrain, wb_override=wb_override, wbc_override=wbc_override)
 
 
 def _funnel_smooth(
     path: list[Point],
     terrain: ZoneTerrain,
     clearance: float = 2.0,
+    wb_override: bytearray | None = None,
+    wbc_override: int | None = None,
 ) -> list[Point]:
     """Clearance-aware reverse-scan funnel smoothing.
 
@@ -797,14 +856,18 @@ def _funnel_smooth(
 
         # Try farthest point first -- with clearance
         for j in range(len(path) - 1, i + 1, -1):
-            if _clear_line_wide(terrain, path[i][0], path[i][1], path[j][0], path[j][1], clearance):
+            if _clear_line_wide(
+                terrain, path[i][0], path[i][1], path[j][0], path[j][1], clearance, wb_override, wbc_override
+            ):
                 best_j = j
                 break
 
         # Fallback: center-only for narrow passages
         if best_j == i + 1 and i + 2 < len(path):
             for j in range(len(path) - 1, i + 1, -1):
-                if _clear_line(terrain, path[i][0], path[i][1], path[j][0], path[j][1]):
+                if _clear_line(
+                    terrain, path[i][0], path[i][1], path[j][0], path[j][1], wb_override, wbc_override
+                ):
                     best_j = j
                     break
 
@@ -814,15 +877,38 @@ def _funnel_smooth(
     return result
 
 
-def vary_path(path: list[Point], terrain: ZoneTerrain, jitter_range: float = 3.0) -> list[Point]:
+def vary_path(
+    path: list[Point],
+    terrain: ZoneTerrain,
+    jitter_range: float = 3.0,
+    near_z: float = float("nan"),
+    wb_override: bytearray | None = None,
+    wbc_override: int | None = None,
+) -> list[Point]:
     """Add small perpendicular offsets to intermediate waypoints.
 
     Applies a uniform lateral drift (1-3u) to each interior point.
     Start/end waypoints are never modified. All offset positions are
     validated against terrain before use.
+
+    When *near_z* and a Z-filtered bitfield are provided, jitter
+    validation uses the bitfield (respecting multi-level terrain) and
+    Z lookup uses ``get_level_z`` to stay on the correct floor.
     """
     if len(path) <= 2:
         return path
+
+    # Pre-fetch grid constants for bitfield walkability checks
+    _use_zbit = wb_override is not None and wbc_override is not None
+    if _use_zbit:
+        _cs = terrain.cell_size
+        _mx = terrain._min_x
+        _my = terrain._min_y
+        _cols = terrain._cols
+        _rows = terrain._rows
+        _bw = _bit_walkable
+
+    _has_near_z = not math.isnan(near_z)
 
     result: list[Point] = [path[0]]
 
@@ -839,21 +925,44 @@ def vary_path(path: list[Point], terrain: ZoneTerrain, jitter_range: float = 3.0
                 offset = random.uniform(-jitter_range, jitter_range)
                 jx = px + perp_x * offset
                 jy = py + perp_y * offset
-                if terrain.is_walkable(jx, jy):
+                # Z-aware walkability: use the filtered bitfield when available
+                if _use_zbit and wb_override is not None and wbc_override is not None:
+                    col = int((jy - _mx) / _cs)
+                    row = int((jx - _my) / _cs)
+                    walkable = _bw(wb_override, wbc_override, col, row, _cols, _rows)
+                else:
+                    walkable = terrain.is_walkable(jx, jy)
+                if walkable:
                     px, py = jx, jy
 
-        _z = terrain.get_z(px, py)
+        # Z-aware height: use get_level_z to stay on the correct floor
+        if _has_near_z:
+            _z = terrain.get_level_z(px, py, near_z)
+        else:
+            _z = terrain.get_z(px, py)
         result.append(Point(px, py, _z if _z == _z else 0.0))
 
     result.append(path[-1])
     return result
 
 
-def _clear_line(terrain: ZoneTerrain, x1: float, y1: float, x2: float, y2: float) -> bool:
+def _clear_line(
+    terrain: ZoneTerrain,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    wb_override: bytearray | None = None,
+    wbc_override: int | None = None,
+) -> bool:
     """Check if a straight line between two game-coord points is walkable.
 
     Uses precomputed bitfield when available (~10x faster than
     _cell_walkable per sample). Falls back to _cell_walkable otherwise.
+
+    When *wb_override*/*wbc_override* are provided (e.g. the Z-filtered
+    bitfield from ``build_walk_bits_z``), they take precedence over the
+    cached Z-agnostic ``terrain._walk_bits``.
     """
     dx, dy = x2 - x1, y2 - y1
     dist = math.hypot(dx, dy)
@@ -864,9 +973,9 @@ def _clear_line(terrain: ZoneTerrain, x1: float, y1: float, x2: float, y2: float
     steps = max(1, int(dist / (cs * 0.5)))
 
     # Fast path: bitfield-accelerated (no coord conversion overhead)
-    wb = terrain._walk_bits
+    wb = wb_override if wb_override is not None else terrain._walk_bits
     if wb:
-        wbc = terrain._walk_byte_cols
+        wbc = wbc_override if wbc_override is not None else terrain._walk_byte_cols
         cols = terrain._cols
         rows = terrain._rows
         mx = terrain._min_x
@@ -893,14 +1002,21 @@ def _clear_line(terrain: ZoneTerrain, x1: float, y1: float, x2: float, y2: float
 
 
 def _clear_line_wide(
-    terrain: ZoneTerrain, x1: float, y1: float, x2: float, y2: float, clearance: float = 2.0
+    terrain: ZoneTerrain,
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    clearance: float = 2.0,
+    wb_override: bytearray | None = None,
+    wbc_override: int | None = None,
 ) -> bool:
     """Check if a line with clearance margin is fully walkable.
 
     Tests center line plus two parallel lines offset by clearance.
     Ensures the agent has breathing room and won't wall-hug.
     """
-    if not _clear_line(terrain, x1, y1, x2, y2):
+    if not _clear_line(terrain, x1, y1, x2, y2, wb_override, wbc_override):
         return False
 
     dx, dy = x2 - x1, y2 - y1
@@ -912,8 +1028,8 @@ def _clear_line_wide(
     px = -dy / dist * clearance
     py = dx / dist * clearance
 
-    if not _clear_line(terrain, x1 + px, y1 + py, x2 + px, y2 + py):
+    if not _clear_line(terrain, x1 + px, y1 + py, x2 + px, y2 + py, wb_override, wbc_override):
         return False
-    if not _clear_line(terrain, x1 - px, y1 - py, x2 - px, y2 - py):
+    if not _clear_line(terrain, x1 - px, y1 - py, x2 - px, y2 - py, wb_override, wbc_override):
         return False
     return True

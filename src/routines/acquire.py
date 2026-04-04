@@ -472,7 +472,7 @@ class AcquireRoutine(RoutineBase):
 
             rsf = self._read_state_fn
             ns = rsf()
-            exact = heading_to(ns.x, ns.y, target.x, target.y)
+            exact = heading_to(ns.pos, target.pos)
             face_heading(exact, lambda: rsf().heading, tolerance=10.0)
             tab_target()
             interruptible_sleep(0.3, self._flee_check)
@@ -610,7 +610,7 @@ class AcquireRoutine(RoutineBase):
     ) -> None:
         """Orient and start a forward walk toward best_mob."""
         walk_dist = min(best_dist - approach_stop, 150.0)
-        exact = heading_to(ns.x, ns.y, best_mob.x, best_mob.y)
+        exact = heading_to(ns.pos, best_mob.pos)
         # Use exact heading for scored targets (precise approach
         # maximizes chance Tab grabs it); jitter for fallback targets
         world = self._ctx.world if self._ctx else None
@@ -697,7 +697,7 @@ class AcquireRoutine(RoutineBase):
                         face_dist = d
                         face_los = False
         if face_target:
-            exact = heading_to(ns.x, ns.y, face_target.x, face_target.y)
+            exact = heading_to(ns.pos, face_target.pos)
             rsf2 = self._read_state_fn
             assert rsf2 is not None
             face_heading(exact, lambda: rsf2().heading, tolerance=8.0)

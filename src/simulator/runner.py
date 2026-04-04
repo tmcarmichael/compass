@@ -18,6 +18,7 @@ from brain.rules import register_all
 from brain.scoring.target import ScoringWeights
 from brain.scoring.weight_learner import GradientTuner
 from brain.world.model import WorldModel
+from core.types import Point
 from motor.actions import set_backend
 from motor.recording import RecordingMotor
 from perception.state import GameState
@@ -91,8 +92,8 @@ class SimulationRunner:
         ctx = AgentContext()
         ctx.pet.alive = True
         ctx.zone.target_cons = frozenset({Con.WHITE, Con.BLUE, Con.LIGHT_BLUE})
-        ctx.camp.camp_x = 200.0
-        ctx.camp.camp_y = 150.0
+        ctx.camp.camp_pos = Point(200.0, 150.0, 0.0)
+
         ctx.camp.roam_radius = 200.0
         return ctx
 
@@ -182,7 +183,7 @@ class SimulationRunner:
             tick_ms = (time.perf_counter() - t0) * 1000
 
             # Track transitions
-            current_routine = self._brain._active_name
+            current_routine = self._brain.active_routine_name
             if current_routine != self._last_routine:
                 result.transitions += 1
                 self._last_routine = current_routine
@@ -194,7 +195,7 @@ class SimulationRunner:
 
             result.record_tick(
                 tick_ms=tick_ms,
-                rule=self._brain._last_matched_rule,
+                rule=self._brain.last_matched_rule,
                 routine=current_routine,
                 phase=phase,
                 actions=list(self._recorder.actions),
@@ -258,7 +259,7 @@ class SimulationRunner:
         ws = build_world_state(state, self._ctx)
 
         # If the previously suggested routine finished, move to the next plan step.
-        if self._brain._active is None and planner.has_plan():
+        if self._brain.active_routine is None and planner.has_plan():
             step = planner.current_step
             advance_ws = ws
             if step is not None and step.routine_name == self._brain._ticked_routine_name:
@@ -276,7 +277,7 @@ class SimulationRunner:
             step = planner.current_step
             if step is not None and step.preconditions_met(ws):
                 suggestion = step.routine_name
-                if self._brain._active is None:
+                if self._brain.active_routine is None:
                     planner.start_step(self._ctx)
             elif step is not None:
                 planner.invalidate("preconditions_failed")
@@ -290,7 +291,7 @@ class SimulationRunner:
                 step = planner.current_step
                 if step is not None and step.preconditions_met(ws):
                     suggestion = step.routine_name
-                    if self._brain._active is None:
+                    if self._brain.active_routine is None:
                         planner.start_step(self._ctx)
 
         self._ctx.diag.goap_suggestion = suggestion

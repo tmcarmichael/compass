@@ -44,7 +44,7 @@ class EvadeRoutine(RoutineBase):
         ep = self._ctx.threat.evasion_point
         log.info("[POSITION] Evade: sidestepping to (%.0f, %.0f)", ep.x, ep.y)
         arrived = move_to_point(
-            ep.x, ep.y, self._read_state_fn, arrival_tolerance=15.0, timeout=8.0, check_fn=self._flee_check
+            ep, self._read_state_fn, arrival_tolerance=15.0, timeout=8.0, check_fn=self._flee_check
         )
         self._done = True
         if not arrived:

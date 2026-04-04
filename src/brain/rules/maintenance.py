@@ -21,8 +21,11 @@ from routines.summon_pet import SummonPetRoutine
 
 if TYPE_CHECKING:
     from brain.context import AgentContext
+    from brain.context_views import MaintenanceView
     from brain.decision import Brain
     from core.types import ReadStateFn
+
+# Helper functions are typed against MaintenanceView.  See context_views.py.
 
 
 @dataclass
@@ -40,20 +43,20 @@ _skip = SkipLog(log)
 # -- Module-level extracted condition/score functions --
 
 
-def _should_memorize_spells(state: GameState, ctx: AgentContext) -> bool:
+def _should_memorize_spells(state: GameState, ctx: MaintenanceView) -> bool:
     if ctx.plan.active == PlanType.NEEDS_MEMORIZE:
         return True
     _skip("Memorize", "no NEEDS_MEMORIZE plan")
     return False
 
 
-def _score_memorize(state: GameState, ctx: AgentContext) -> float:
+def _score_memorize(state: GameState, ctx: MaintenanceView) -> float:
     return 1.0 if ctx.plan.active == PlanType.NEEDS_MEMORIZE else 0.0
 
 
 def _should_summon_pet(
     state: GameState,
-    ctx: AgentContext,
+    ctx: MaintenanceView,
     get_spell: Callable[[SpellRole], Spell | None] = get_spell_by_role,
 ) -> bool:
     pet_spell = get_spell(SpellRole.PET_SUMMON)
@@ -74,7 +77,7 @@ def _should_summon_pet(
 
 def _score_summon_pet(
     state: GameState,
-    ctx: AgentContext,
+    ctx: MaintenanceView,
     get_spell: Callable[[SpellRole], Spell | None] = get_spell_by_role,
 ) -> float:
     pet_spell = get_spell(SpellRole.PET_SUMMON)
@@ -91,7 +94,7 @@ def _score_summon_pet(
 
 def _should_buff(
     state: GameState,
-    ctx: AgentContext,
+    ctx: MaintenanceView,
     rs: _MaintenanceRuleState,
     get_spell: Callable[[SpellRole], Spell | None] = get_spell_by_role,
 ) -> bool:
@@ -162,7 +165,7 @@ def _should_buff(
 
 def _score_buff(
     state: GameState,
-    ctx: AgentContext,
+    ctx: MaintenanceView,
     rs: _MaintenanceRuleState,
     get_spell: Callable[[SpellRole], Spell | None] = get_spell_by_role,
 ) -> float:

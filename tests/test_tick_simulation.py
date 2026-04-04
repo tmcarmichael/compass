@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.types import Point
 from routines.base import RoutineBase, RoutineStatus
 from tests.factories import make_agent_context, make_game_state, make_spawn
 
@@ -331,8 +332,7 @@ class TestWanderTickSimulation:
         from routines.wander import WanderRoutine
 
         ctx = make_agent_context()
-        ctx.camp.camp_x = 0.0
-        ctx.camp.camp_y = 0.0
+        ctx.camp.camp_pos = Point(0.0, 0.0, 0.0)
         ctx.camp.hunt_min_dist = 50.0
         ctx.camp.hunt_max_dist = 300.0
         routine = WanderRoutine(camp_x=0.0, camp_y=0.0, ctx=ctx)
@@ -1055,8 +1055,7 @@ class TestWanderDeepTicks:
         from routines.wander import WanderRoutine
 
         ctx = make_agent_context()
-        ctx.camp.camp_x = 100.0
-        ctx.camp.camp_y = 100.0
+        ctx.camp.camp_pos = Point(100.0, 100.0, 0.0)
         ctx.camp.hunt_min_dist = 50.0
         ctx.camp.hunt_max_dist = 300.0
         state = make_game_state(x=150.0, y=150.0)
@@ -1074,8 +1073,7 @@ class TestWanderDeepTicks:
         from routines.wander import WanderRoutine
 
         ctx = make_agent_context()
-        ctx.camp.camp_x = 0.0
-        ctx.camp.camp_y = 0.0
+        ctx.camp.camp_pos = Point(0.0, 0.0, 0.0)
         ctx.camp.hunt_max_dist = 100.0
         far = make_game_state(x=500.0, y=500.0)
 

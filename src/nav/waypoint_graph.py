@@ -8,7 +8,6 @@ Used by travel planning for multi-leg routes and corpse recovery.
 """
 
 import logging
-import math
 from collections import deque
 
 from core.types import Point
@@ -29,8 +28,8 @@ class WaypointGraph:
         self.coords: dict[str, Point] = {}
         self.edges: dict[str, set[str]] = {}
 
-    def add_node(self, name: str, x: float, y: float) -> None:
-        self.coords[name] = Point(x, y, 0.0)
+    def add_node(self, name: str, pos: Point) -> None:
+        self.coords[name] = pos
         if name not in self.edges:
             self.edges[name] = set()
 
@@ -43,12 +42,12 @@ class WaypointGraph:
         self.edges[a].add(b)
         self.edges[b].add(a)
 
-    def nearest_node(self, x: float, y: float, threshold: float = 500.0) -> str | None:
-        """Find the nearest waypoint within threshold distance."""
+    def nearest_node(self, pos: Point, threshold: float = 500.0) -> str | None:
+        """Find the nearest waypoint within threshold distance (2D)."""
         best_name = None
         best_dist = threshold
         for name, pt in self.coords.items():
-            d = math.hypot(x - pt.x, y - pt.y)
+            d = pos.dist_2d(pt)
             if d < best_dist:
                 best_dist = d
                 best_name = name
@@ -97,7 +96,7 @@ def parse_waypoint_graph(zone_config: dict) -> WaypointGraph:
 
     # Add all waypoints as nodes
     for wp in zone_config.get("waypoints", []):
-        graph.add_node(wp["name"], wp["x"], wp["y"])
+        graph.add_node(wp["name"], Point(wp["x"], wp["y"], wp.get("z", 0.0)))
 
     # Add edges from [[waypoint_edges]] chains
     for edge_def in zone_config.get("waypoint_edges", []):

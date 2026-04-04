@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from brain.goap.world_state import PlanWorldState
+from core.types import Point
 
 
 class TestDefaults:
@@ -111,7 +112,7 @@ class TestBuildWorldState:
         return SimpleNamespace(
             pet=SimpleNamespace(alive=pet_alive),
             combat=SimpleNamespace(engaged=engaged),
-            camp=SimpleNamespace(camp_x=camp_x, camp_y=camp_y, roam_radius=roam_radius),
+            camp=SimpleNamespace(camp_pos=Point(camp_x, camp_y, 0.0), roam_radius=roam_radius),
             inventory=SimpleNamespace(
                 weight_baseline=weight_baseline,
                 weight_threshold=weight_threshold,
@@ -228,7 +229,7 @@ class TestBuildWorldState:
         ctx = SimpleNamespace(
             pet=SimpleNamespace(alive=True),
             combat=SimpleNamespace(engaged=False),
-            camp=SimpleNamespace(camp_x=0.0, camp_y=0.0, roam_radius=200.0),
+            camp=SimpleNamespace(camp_pos=Point(0.0, 0.0, 0.0), roam_radius=200.0),
             inventory=SimpleNamespace(weight_baseline=0, weight_threshold=100),
             has_unlootable_corpse=lambda state, max_dist=100.0: False,
             world=None,

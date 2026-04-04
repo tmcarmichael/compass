@@ -24,8 +24,12 @@ from routines.pull import PullRoutine
 
 if TYPE_CHECKING:
     from brain.context import AgentContext
+    from brain.context_views import CombatView
     from brain.decision import Brain
     from core.types import ReadStateFn
+
+# Helper functions are typed against CombatView to enforce that combat
+# rules only access the subset of AgentContext they need.  See context_views.py.
 
 
 @dataclass
@@ -44,7 +48,7 @@ _skip = SkipLog(log)
 
 def _should_combat(
     state: GameState,
-    ctx: AgentContext,
+    ctx: CombatView,
 ) -> bool:
     """Pure predicate: should the IN_COMBAT routine activate?
 
@@ -76,7 +80,7 @@ def _should_combat(
     return False
 
 
-def _score_in_combat(state: GameState, ctx: AgentContext) -> float:
+def _score_in_combat(state: GameState, ctx: CombatView) -> float:
     # Actively engaged with a live target
     if ctx.combat.engaged:
         if state.target is not None and state.target.is_npc and state.target.hp_current > 0:
@@ -91,7 +95,7 @@ def _score_in_combat(state: GameState, ctx: AgentContext) -> float:
     return 0.0
 
 
-def _engage_add_suppressed(ctx: AgentContext, state: GameState, rs: _CombatRuleState) -> bool:
+def _engage_add_suppressed(ctx: CombatView, state: GameState, rs: _CombatRuleState) -> bool:
     """Return True if EngageAdd should be suppressed (skipped)."""
     if ctx.combat.engaged:
         rs.add_first_seen = 0.0
@@ -106,7 +110,7 @@ def _engage_add_suppressed(ctx: AgentContext, state: GameState, rs: _CombatRuleS
 
 def _should_engage_add(
     state: GameState,
-    ctx: AgentContext,
+    ctx: CombatView,
     rs: _CombatRuleState,
 ) -> bool:
     if _engage_add_suppressed(ctx, state, rs):
@@ -167,7 +171,7 @@ def _should_engage_add(
     return False
 
 
-def _score_engage_add(state: GameState, ctx: AgentContext) -> float:
+def _score_engage_add(state: GameState, ctx: CombatView) -> float:
     if ctx.combat.engaged:
         return 0.0
     if not ctx.pet.alive:
@@ -177,7 +181,7 @@ def _score_engage_add(state: GameState, ctx: AgentContext) -> float:
     return 0.0
 
 
-def _has_close_pull_target(state: GameState, ctx: AgentContext) -> bool:
+def _has_close_pull_target(state: GameState, ctx: CombatView) -> bool:
     """Return True if a valid pull target is within 50u during TRAVEL plan."""
     target_cons = ctx.zone.target_cons if ctx.zone.target_cons else {Con.BLUE, Con.LIGHT_BLUE, Con.WHITE}
     for sp in state.spawns:
@@ -196,7 +200,7 @@ def _has_close_pull_target(state: GameState, ctx: AgentContext) -> bool:
     return False
 
 
-def _has_pending_loot(ctx: AgentContext) -> bool:
+def _has_pending_loot(ctx: CombatView) -> bool:
     """True if a recent unlooted defeat should delay acquire."""
     smart = flags.loot_mode == LootMode.SMART
     resource_bases = set()
@@ -213,7 +217,7 @@ def _has_pending_loot(ctx: AgentContext) -> bool:
     return False
 
 
-def _acquire_suppressed(ctx: AgentContext, state: GameState) -> bool:
+def _acquire_suppressed(ctx: CombatView, state: GameState) -> bool:
     """Return True if Acquire should be suppressed (skipped).
 
     Checks feature flags, pet availability, looting delays, active plans,
@@ -257,7 +261,7 @@ def _acquire_suppressed(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def _pet_too_far(ctx: AgentContext, state: GameState) -> bool:
+def _pet_too_far(ctx: CombatView, state: GameState) -> bool:
     """Return True (with skip log) if the pet is beyond 200u."""
     if ctx.pet.alive and ctx.pet.spawn_id:
         for sp in state.spawns:
@@ -270,7 +274,7 @@ def _pet_too_far(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def _pet_hp_low(ctx: AgentContext, state: GameState) -> bool:
+def _pet_hp_low(ctx: CombatView, state: GameState) -> bool:
     """Return True (with skip log) if pet HP is below 50%."""
     if ctx.pet.alive and ctx.pet.spawn_id:
         for sp in state.spawns:
@@ -283,7 +287,7 @@ def _pet_hp_low(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def _acquire_not_ready(ctx: AgentContext, state: GameState) -> bool:
+def _acquire_not_ready(ctx: CombatView, state: GameState) -> bool:
     """Return True if Acquire should be skipped due to readiness state.
 
     Checks pet fighting, pet distance, pet HP, player HP, pull_target_id,
@@ -320,7 +324,7 @@ def _acquire_not_ready(ctx: AgentContext, state: GameState) -> bool:
     return False
 
 
-def _danger_blocks_acquire(state: GameState, ctx: AgentContext) -> bool:
+def _danger_blocks_acquire(state: GameState, ctx: CombatView) -> bool:
     """Return True if learned danger for a nearby NPC blocks acquire."""
     fh = ctx.fight_history
     if not fh:
@@ -355,7 +359,7 @@ def _danger_blocks_acquire(state: GameState, ctx: AgentContext) -> bool:
     return False
 
 
-def _should_acquire(state: GameState, ctx: AgentContext) -> bool:
+def _should_acquire(state: GameState, ctx: CombatView) -> bool:
     if _acquire_suppressed(ctx, state):
         return False
     if _acquire_not_ready(ctx, state):
@@ -388,7 +392,7 @@ def _should_acquire(state: GameState, ctx: AgentContext) -> bool:
 
 def _score_acquire(
     state: GameState,
-    ctx: AgentContext,
+    ctx: CombatView,
     _get_spell: Callable[[str], Spell | None] = get_spell_by_role,
 ) -> float:
     if not flags.pull:
@@ -407,7 +411,7 @@ def _score_acquire(
     return hp_factor * mana_factor * pet_factor
 
 
-def _should_pull(state: GameState, ctx: AgentContext) -> bool:
+def _should_pull(state: GameState, ctx: CombatView) -> bool:
     if ctx.combat.pull_target_id is None:
         _skip("Pull", "no pull_target_id")
         return False
@@ -417,7 +421,7 @@ def _should_pull(state: GameState, ctx: AgentContext) -> bool:
     return True
 
 
-def _score_pull(state: GameState, ctx: AgentContext) -> float:
+def _score_pull(state: GameState, ctx: CombatView) -> float:
     if ctx.combat.pull_target_id is None:
         return 0.0
     if ctx.combat.engaged:

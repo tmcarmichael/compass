@@ -30,7 +30,7 @@ from core.constants import (
     SOCIAL_NPC_RADIUS,
 )
 from core.timing import interruptible_sleep, varying_sleep
-from core.types import FailureCategory, ReadStateFn, SpellOutcome
+from core.types import FailureCategory, Point, ReadStateFn, SpellOutcome
 from eq.loadout import SpellRole, get_spell_by_role
 from eq.strings import normalize_mob_name
 from motor.actions import (
@@ -232,7 +232,7 @@ class PullRoutine(RoutineBase):
             px, py = fresh.x, fresh.y
         else:
             px, py = state.x, state.y
-        exact = heading_to(px, py, target.x, target.y)
+        exact = heading_to(Point(px, py, 0.0), target.pos)
         desired = (exact + random.gauss(0, FACE_JITTER_SIGMA)) % 512.0
         rsf = self._read_state_fn
         if rsf:

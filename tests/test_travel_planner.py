@@ -198,9 +198,9 @@ class TestPlanTravelLegsTunnel:
 class TestPlanTravelLegsGraph:
     def _make_graph(self) -> WaypointGraph:
         g = WaypointGraph()
-        g.add_node("start", 0.0, 0.0)
-        g.add_node("mid", 500.0, 500.0)
-        g.add_node("end", 1000.0, 1000.0)
+        g.add_node("start", Point(0.0, 0.0, 0.0))
+        g.add_node("mid", Point(500.0, 500.0, 0.0))
+        g.add_node("end", Point(1000.0, 1000.0, 0.0))
         g.add_edge("start", "mid")
         g.add_edge("mid", "end")
         return g
@@ -336,9 +336,9 @@ class TestPlanTravelLegsGraphTunnel:
     def test_graph_with_tunnel_edge(self) -> None:
         """Waypoint graph route uses tunnel when available on edge."""
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 500.0, 500.0)
-        g.add_node("c", 1000.0, 1000.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(500.0, 500.0, 0.0))
+        g.add_node("c", Point(1000.0, 1000.0, 0.0))
         g.add_edge("a", "b")
         g.add_edge("b", "c")
         # Tunnel between b and c
@@ -359,8 +359,8 @@ class TestPlanTravelLegsGraphTunnel:
     def test_graph_start_far_from_first_node_prepends_leg(self) -> None:
         """When start is far from the first graph node, a pathfind leg is prepended."""
         g = WaypointGraph()
-        g.add_node("mid", 500.0, 500.0)
-        g.add_node("end", 1000.0, 1000.0)
+        g.add_node("mid", Point(500.0, 500.0, 0.0))
+        g.add_node("end", Point(1000.0, 1000.0, 0.0))
         g.add_edge("mid", "end")
         # Start at 400,400 -- near "mid" (within threshold), but >50 units away
         legs = plan_travel_legs([], 400.0, 400.0, 1000.0, 1000.0, waypoint_graph=g)
@@ -371,10 +371,10 @@ class TestPlanTravelLegsGraphTunnel:
     def test_graph_path_trimming(self) -> None:
         """When agent is closer to a mid-path node, earlier nodes are trimmed."""
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 100.0)
-        g.add_node("c", 200.0, 200.0)
-        g.add_node("d", 300.0, 300.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 100.0, 0.0))
+        g.add_node("c", Point(200.0, 200.0, 0.0))
+        g.add_node("d", Point(300.0, 300.0, 0.0))
         g.add_edge("a", "b")
         g.add_edge("b", "c")
         g.add_edge("c", "d")
@@ -386,8 +386,8 @@ class TestPlanTravelLegsGraphTunnel:
     def test_graph_no_match_both_nodes_missing(self) -> None:
         """Nodes not near any waypoint -> falls back to single A* leg."""
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 100.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 100.0, 0.0))
         g.add_edge("a", "b")
         legs = plan_travel_legs([], 5000.0, 5000.0, 6000.0, 6000.0, waypoint_graph=g)
         assert len(legs) == 1

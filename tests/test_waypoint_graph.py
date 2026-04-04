@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from core.types import Point
 from nav.waypoint_graph import WaypointGraph, parse_waypoint_graph
 
 # ---------------------------------------------------------------------------
@@ -18,22 +19,22 @@ from nav.waypoint_graph import WaypointGraph, parse_waypoint_graph
 class TestAddNodesAndEdges:
     def test_add_node(self) -> None:
         g = WaypointGraph()
-        g.add_node("camp", 100.0, 200.0)
+        g.add_node("camp", Point(100.0, 200.0, 0.0))
         assert "camp" in g.coords
         assert g.coords["camp"].x == 100.0
         assert g.coords["camp"].y == 200.0
 
     def test_add_node_creates_edge_set(self) -> None:
         g = WaypointGraph()
-        g.add_node("camp", 0.0, 0.0)
+        g.add_node("camp", Point(0.0, 0.0, 0.0))
         assert "camp" in g.edges
         assert isinstance(g.edges["camp"], set)
         assert len(g.edges["camp"]) == 0
 
     def test_add_edge_bidirectional(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 0.0, 0.0))
         g.add_edge("a", "b")
         assert "b" in g.edges["a"]
         assert "a" in g.edges["b"]
@@ -47,17 +48,17 @@ class TestAddNodesAndEdges:
 
     def test_multiple_edges(self) -> None:
         g = WaypointGraph()
-        g.add_node("center", 0.0, 0.0)
-        g.add_node("north", 0.0, 100.0)
-        g.add_node("south", 0.0, -100.0)
+        g.add_node("center", Point(0.0, 0.0, 0.0))
+        g.add_node("north", Point(0.0, 100.0, 0.0))
+        g.add_node("south", Point(0.0, -100.0, 0.0))
         g.add_edge("center", "north")
         g.add_edge("center", "south")
         assert g.edges["center"] == {"north", "south"}
 
     def test_repr(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 1.0, 1.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(1.0, 1.0, 0.0))
         g.add_edge("a", "b")
         r = repr(g)
         assert "WaypointGraph" in r
@@ -73,26 +74,26 @@ class TestAddNodesAndEdges:
 class TestNearestNode:
     def test_nearest_node_basic(self) -> None:
         g = WaypointGraph()
-        g.add_node("close", 10.0, 10.0)
-        g.add_node("far", 500.0, 500.0)
-        result = g.nearest_node(0.0, 0.0)
+        g.add_node("close", Point(10.0, 10.0, 0.0))
+        g.add_node("far", Point(500.0, 500.0, 0.0))
+        result = g.nearest_node(Point(0.0, 0.0, 0.0))
         assert result == "close"
 
     def test_nearest_node_with_threshold(self) -> None:
         g = WaypointGraph()
-        g.add_node("far", 1000.0, 1000.0)
-        result = g.nearest_node(0.0, 0.0, threshold=100.0)
+        g.add_node("far", Point(1000.0, 1000.0, 0.0))
+        result = g.nearest_node(Point(0.0, 0.0, 0.0), threshold=100.0)
         assert result is None
 
     def test_nearest_node_returns_none_when_empty(self) -> None:
         g = WaypointGraph()
-        result = g.nearest_node(0.0, 0.0)
+        result = g.nearest_node(Point(0.0, 0.0, 0.0))
         assert result is None
 
     def test_nearest_node_exact_match(self) -> None:
         g = WaypointGraph()
-        g.add_node("here", 50.0, 50.0)
-        result = g.nearest_node(50.0, 50.0)
+        g.add_node("here", Point(50.0, 50.0, 0.0))
+        result = g.nearest_node(Point(50.0, 50.0, 0.0))
         assert result == "here"
 
     @pytest.mark.parametrize(
@@ -106,11 +107,11 @@ class TestNearestNode:
     )
     def test_nearest_node_four_corners(self, px: float, py: float, expected: str) -> None:
         g = WaypointGraph()
-        g.add_node("sw", 0.0, 0.0)
-        g.add_node("se", 100.0, 0.0)
-        g.add_node("nw", 0.0, 100.0)
-        g.add_node("ne", 100.0, 100.0)
-        result = g.nearest_node(px, py)
+        g.add_node("sw", Point(0.0, 0.0, 0.0))
+        g.add_node("se", Point(100.0, 0.0, 0.0))
+        g.add_node("nw", Point(0.0, 100.0, 0.0))
+        g.add_node("ne", Point(100.0, 100.0, 0.0))
+        result = g.nearest_node(Point(px, py, 0.0))
         assert result == expected
 
     @given(
@@ -121,9 +122,9 @@ class TestNearestNode:
     def test_nearest_node_always_within_threshold(self, x: float, y: float) -> None:
         """Property: if nearest_node returns a name, it is within threshold."""
         g = WaypointGraph()
-        g.add_node("origin", 0.0, 0.0)
+        g.add_node("origin", Point(0.0, 0.0, 0.0))
         threshold = 2000.0
-        result = g.nearest_node(x, y, threshold=threshold)
+        result = g.nearest_node(Point(x, y, 0.0), threshold=threshold)
         if result is not None:
             p = g.coords[result]
             dist = math.hypot(x - p.x, y - p.y)
@@ -138,17 +139,17 @@ class TestNearestNode:
 class TestFindPath:
     def test_direct_path(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 0.0, 0.0))
         g.add_edge("a", "b")
         path = g.find_path("a", "b")
         assert path == ["a", "b"]
 
     def test_multi_hop_path(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 50.0, 0.0)
-        g.add_node("c", 100.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(50.0, 0.0, 0.0))
+        g.add_node("c", Point(100.0, 0.0, 0.0))
         g.add_edge("a", "b")
         g.add_edge("b", "c")
         path = g.find_path("a", "c")
@@ -157,10 +158,10 @@ class TestFindPath:
     def test_shortest_path_preferred(self) -> None:
         """BFS finds shortest path when multiple exist."""
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 50.0, 0.0)
-        g.add_node("c", 100.0, 0.0)
-        g.add_node("d", 100.0, 50.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(50.0, 0.0, 0.0))
+        g.add_node("c", Point(100.0, 0.0, 0.0))
+        g.add_node("d", Point(100.0, 50.0, 0.0))
         # Direct: a -> d
         g.add_edge("a", "d")
         # Long: a -> b -> c -> d
@@ -172,8 +173,8 @@ class TestFindPath:
 
     def test_path_is_bidirectional(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 0.0, 0.0))
         g.add_edge("a", "b")
         assert g.find_path("a", "b") is not None
         assert g.find_path("b", "a") is not None
@@ -187,9 +188,9 @@ class TestFindPath:
 class TestDisconnectedPath:
     def test_no_path_disconnected(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
-        g.add_node("b", 100.0, 0.0)
-        g.add_node("c", 200.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
+        g.add_node("b", Point(100.0, 0.0, 0.0))
+        g.add_node("c", Point(200.0, 0.0, 0.0))
         g.add_edge("a", "b")
         # c is disconnected
         path = g.find_path("a", "c")
@@ -197,23 +198,23 @@ class TestDisconnectedPath:
 
     def test_no_path_unknown_start(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
         path = g.find_path("unknown", "a")
         assert path is None
 
     def test_no_path_unknown_end(self) -> None:
         g = WaypointGraph()
-        g.add_node("a", 0.0, 0.0)
+        g.add_node("a", Point(0.0, 0.0, 0.0))
         path = g.find_path("a", "unknown")
         assert path is None
 
     def test_two_disconnected_components(self) -> None:
         g = WaypointGraph()
-        g.add_node("a1", 0.0, 0.0)
-        g.add_node("a2", 10.0, 0.0)
+        g.add_node("a1", Point(0.0, 0.0, 0.0))
+        g.add_node("a2", Point(10.0, 0.0, 0.0))
         g.add_edge("a1", "a2")
-        g.add_node("b1", 1000.0, 0.0)
-        g.add_node("b2", 1010.0, 0.0)
+        g.add_node("b1", Point(1000.0, 0.0, 0.0))
+        g.add_node("b2", Point(1010.0, 0.0, 0.0))
         g.add_edge("b1", "b2")
         assert g.find_path("a1", "b1") is None
         assert g.find_path("b2", "a1") is None
@@ -227,7 +228,7 @@ class TestDisconnectedPath:
 class TestSelfPath:
     def test_same_node_returns_single_element(self) -> None:
         g = WaypointGraph()
-        g.add_node("camp", 0.0, 0.0)
+        g.add_node("camp", Point(0.0, 0.0, 0.0))
         path = g.find_path("camp", "camp")
         assert path == ["camp"]
 

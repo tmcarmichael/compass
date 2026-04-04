@@ -111,31 +111,32 @@ class _MobHistory(PatrolMixin):
         # Delegate patrol trace update to PatrolMixin
         self._update_patrol_trace(t, pos)
 
-    def velocity(self, spawn: SpawnData | None = None) -> tuple[float, float]:
+    def velocity(self, spawn: SpawnData | None = None) -> tuple[float, float, float]:
         """Get velocity (units/sec). Prefers direct memory read when available.
 
         Args:
-            spawn: SpawnData with velocity_x/velocity_y from entity struct.
+            spawn: SpawnData with velocity_x/velocity_y/velocity_z from entity struct.
                    Falls back to position-delta computation if None or zero.
         """
         # Prefer instant memory-read velocity (no lag)
         if spawn is not None:
             vx = getattr(spawn, "velocity_x", 0.0)
             vy = getattr(spawn, "velocity_y", 0.0)
-            if vx != 0.0 or vy != 0.0:
-                return (vx, vy)
+            vz = getattr(spawn, "velocity_z", 0.0)
+            if vx != 0.0 or vy != 0.0 or vz != 0.0:
+                return (vx, vy, vz)
         # Fallback: compute from position history (~0.3s lag)
         if len(self.positions) < 2:
-            return (0.0, 0.0)
-        t0, x0, y0, _z0 = self.positions[0]
-        t1, x1, y1, _z1 = self.positions[-1]
+            return (0.0, 0.0, 0.0)
+        t0, x0, y0, z0 = self.positions[0]
+        t1, x1, y1, z1 = self.positions[-1]
         dt = t1 - t0
         if dt < 0.3:
-            return (0.0, 0.0)
-        return ((x1 - x0) / dt, (y1 - y0) / dt)
+            return (0.0, 0.0, 0.0)
+        return ((x1 - x0) / dt, (y1 - y0) / dt, (z1 - z0) / dt)
 
     def speed(self) -> float:
-        vx, vy = self.velocity()
+        vx, vy, _vz = self.velocity()
         return math.sqrt(vx * vx + vy * vy)
 
     def predicted_pos(self, seconds: float) -> Point:
@@ -143,8 +144,8 @@ class _MobHistory(PatrolMixin):
         if not self.positions:
             return Point(0.0, 0.0, 0.0)
         _, x, y, z = self.positions[-1]
-        vx, vy = self.velocity()
-        return Point(x + vx * seconds, y + vy * seconds, z)
+        vx, vy, vz = self.velocity()
+        return Point(x + vx * seconds, y + vy * seconds, z + vz * seconds)
 
     def hp_rate(self) -> float:
         """HP% lost per second. Positive = taking damage (HP decreasing).
@@ -195,8 +196,7 @@ class WorldModel:
         self._pet_hp_history: deque[tuple[float, float]] = deque()  # (timestamp, hp_pct)
 
         # Player position (updated each tick for heading calculations)
-        self._last_player_x: float = 0.0
-        self._last_player_y: float = 0.0
+        self._last_player_pos: Point = Point(0.0, 0.0, 0.0)
 
         # Profiling: last update() wall time in ms
         self.update_ms: float = 0.0
@@ -292,8 +292,7 @@ class WorldModel:
         self,
         spawn: SpawnData,
         now: float,
-        player_x: float,
-        player_y: float,
+        player_pos: Point,
         player_level: int,
         camp_x: float,
         camp_y: float,
@@ -316,7 +315,7 @@ class WorldModel:
         tracker.add(now, spawn.pos, hp_pct=hp_pct)
 
         # Basic calculations
-        dist = Point(player_x, player_y, 0.0).dist_to(spawn.pos)
+        dist = player_pos.dist_to(spawn.pos)
         camp_dist = (
             ctx.camp.effective_camp_distance(spawn.pos)
             if ctx
@@ -390,12 +389,11 @@ class WorldModel:
         self._last_update = now
 
         ctx = self._ctx
-        player_x, player_y = state.x, state.y
-        self._last_player_x = player_x
-        self._last_player_y = player_y
+        player_pos = state.pos
+        self._last_player_pos = player_pos
         player_level = state.level
-        camp_x = ctx.camp.camp_x if ctx else 0.0
-        camp_y = ctx.camp.camp_y if ctx else 0.0
+        camp_x = ctx.camp.camp_pos.x if ctx else 0.0
+        camp_y = ctx.camp.camp_pos.y if ctx else 0.0
         zone_disps = ctx.zone.zone_dispositions if ctx else None
         social_groups = ctx.zone.social_mob_group if ctx else {}
 
@@ -436,8 +434,7 @@ class WorldModel:
             profile = self._build_npc_profile(
                 spawn,
                 now,
-                player_x,
-                player_y,
+                player_pos,
                 player_level,
                 camp_x,
                 camp_y,
@@ -473,8 +470,8 @@ class WorldModel:
                 self._profiles,
                 self._players,
                 ctx=ctx,
-                player_x=self._last_player_x,
-                player_y=self._last_player_y,
+                player_x=self._last_player_pos.x,
+                player_y=self._last_player_pos.y,
                 fight_durations=self._fight_durations,
             )
 
@@ -493,8 +490,8 @@ class WorldModel:
                 self._profiles,
                 self._players,
                 ctx=ctx,
-                player_x=self._last_player_x,
-                player_y=self._last_player_y,
+                player_x=self._last_player_pos.x,
+                player_y=self._last_player_pos.y,
                 fight_durations=self._fight_durations,
                 breakdown=bd,
             )
@@ -810,7 +807,7 @@ class WorldModel:
     # -- Heading analysis --------------------------------------------
 
     @staticmethod
-    def is_approaching(spawn: SpawnData, player_x: float, player_y: float) -> bool:
+    def is_approaching(spawn: SpawnData, player_pos: Point) -> bool:
         """True if *spawn* is facing toward the player AND moving.
 
         Uses the spawn's heading (0-512) and speed fields.
@@ -820,7 +817,7 @@ class WorldModel:
         """
         if spawn.speed <= 0.5:
             return False
-        angle_to_player = heading_to(spawn.x, spawn.y, player_x, player_y)
+        angle_to_player = heading_to(spawn.pos, player_pos)
         heading_error: float = abs(spawn.heading - angle_to_player) % 512
         if heading_error > 256:
             heading_error = 512 - heading_error
@@ -828,12 +825,12 @@ class WorldModel:
         return approaching
 
     @staticmethod
-    def heading_error_to(spawn: SpawnData, target_x: float, target_y: float) -> float:
+    def heading_error_to(spawn: SpawnData, target_pos: Point) -> float:
         """Heading error (0-256) between spawn's facing and the direction to a point.
 
         0 = facing directly at the point, 256 = facing directly away.
         """
-        angle_to_target = heading_to(spawn.x, spawn.y, target_x, target_y)
+        angle_to_target = heading_to(spawn.pos, target_pos)
         err: float = abs(spawn.heading - angle_to_target) % 512
         if err > 256:
             err = 512 - err

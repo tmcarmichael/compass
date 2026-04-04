@@ -1,9 +1,10 @@
 """StuckDetector: fast displacement check with instant speed-based detection."""
 
-import math
 import time
 from collections import deque
 from collections.abc import Callable
+
+from core.types import Point
 
 
 class StuckDetector:
@@ -28,10 +29,10 @@ class StuckDetector:
         self._min_distance = min_distance
         self._clock = clock
 
-        self._history: deque[tuple[float, float, float]] = deque()  # (time, x, y)
+        self._history: deque[tuple[float, Point]] = deque()
         self._stuck_since: float | None = None
         # Fast detection: track last few positions
-        self._recent: deque[tuple[float, float]] = deque(maxlen=4)  # last 4 (x, y)
+        self._recent: deque[Point] = deque(maxlen=4)
         self._recent_time: float = 0.0
         # Speed-based detection: consecutive zero-speed ticks
         self._zero_speed_count: int = 0
@@ -43,18 +44,17 @@ class StuckDetector:
         self._stuck_since = None
         self._zero_speed_count = 0
 
-    def check(self, x: float, y: float, speed: float = -1.0) -> bool:
+    def check(self, pos: Point, speed: float = -1.0) -> bool:
         """Record position and return True if stuck.
 
         Args:
-            x: current X position.
-            y: current Y position.
+            pos: current position as Point.
             speed: game-reported movement speed (optional). When >= 0,
                    enables fast zero-speed stuck detection. Pass -1.0
                    (default) to skip speed-based checks.
         """
         now = self._clock()
-        self._history.append((now, x, y))
+        self._history.append((now, pos))
 
         # -- Speed-based fast path: zero speed while we expect movement --
         if speed >= 0 and speed < 0.1:
@@ -67,11 +67,11 @@ class StuckDetector:
             self._zero_speed_count = 0
 
         # -- Fast check: last 3 positions nearly identical --
-        self._recent.append((x, y))
+        self._recent.append(pos)
 
         if len(self._recent) >= 3:
-            x0, y0 = self._recent[0]
-            total_disp = math.hypot(x - x0, y - y0)
+            first = self._recent[0]
+            total_disp = pos.dist_2d(first)
             if total_disp < 1.5:
                 # Barely moved in 3+ samples (~0.5s)  -  stuck
                 if self._stuck_since is None:
@@ -86,12 +86,12 @@ class StuckDetector:
         if len(self._history) < 2:
             return False
 
-        t0, x0, y0 = self._history[0]
+        t0, pos0 = self._history[0]
         elapsed = now - t0
         if elapsed < self._check_seconds * 0.4:
             return False
 
-        dist = math.hypot(x - x0, y - y0)
+        dist = pos.dist_2d(pos0)
         if dist < self._min_distance:
             if self._stuck_since is None:
                 self._stuck_since = now

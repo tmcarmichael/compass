@@ -270,8 +270,7 @@ class TestScoreCamp:
         """Build a minimal ctx with a camp that delegates effective_camp_distance."""
 
         camp = SimpleNamespace(
-            camp_x=camp_x,
-            camp_y=camp_y,
+            camp_pos=Point(camp_x, camp_y, 0.0),
             roam_radius=roam_radius,
             effective_camp_distance=lambda pos: pos.dist_to(Point(camp_x, camp_y, 0.0)),
         )
@@ -350,7 +349,7 @@ class TestHeadingMultiplier:
 
         npc_x, npc_y = 100.0, 100.0
         player_x, player_y = 100.0, 200.0
-        h = heading_to(npc_x, npc_y, player_x, player_y)
+        h = heading_to(Point(npc_x, npc_y, 0.0), Point(player_x, player_y, 0.0))
         # Set NPC heading to match the angle toward player (facing player)
         mob = make_mob_profile(
             spawn=make_spawn(name="a_skeleton", x=npc_x, y=npc_y, heading=h),
@@ -366,7 +365,7 @@ class TestHeadingMultiplier:
 
         npc_x, npc_y = 100.0, 100.0
         player_x, player_y = 100.0, 200.0
-        h = heading_to(npc_x, npc_y, player_x, player_y)
+        h = heading_to(Point(npc_x, npc_y, 0.0), Point(player_x, player_y, 0.0))
         # Opposite direction: heading 180 degrees away in 512-unit system = h + 256
         away_heading = (h + 256) % 512
         mob = make_mob_profile(
@@ -403,7 +402,7 @@ class TestHeadingMultiplier:
 
         npc_x, npc_y = 100.0, 100.0
         player_x, player_y = 100.0, 200.0
-        h = heading_to(npc_x, npc_y, player_x, player_y)
+        h = heading_to(Point(npc_x, npc_y, 0.0), Point(player_x, player_y, 0.0))
         # 90 degrees off in 512 system = 128 units. That's between 60 and 180.
         perp_heading = (h + 128) % 512
         mob = make_mob_profile(
@@ -782,8 +781,7 @@ class TestScoreTargetWithContext:
         """Build a minimal ctx with loot, danger_memory, fight_history, spatial_memory, zone, camp."""
 
         camp = SimpleNamespace(
-            camp_x=0.0,
-            camp_y=0.0,
+            camp_pos=Point(0.0, 0.0, 0.0),
             roam_radius=250.0,
             effective_camp_distance=lambda pos: pos.dist_to(Point(0.0, 0.0, 0.0)),
         )

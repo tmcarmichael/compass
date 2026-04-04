@@ -195,34 +195,36 @@ class AgentOrchestrator:
 
     def travel_to(self, dest_name: str) -> dict:
         """Initiate travel to a waypoint or zone."""
-        if not self.agent_running or not self.agent_ctx:
-            return {"error": "Agent not running"}
+        with self._agent_lock:
+            if not self.agent_running or not self.agent_ctx:
+                return {"error": "Agent not running"}
+            ctx = self.agent_ctx
         from brain.state.plan import TravelPlan
 
         if dest_name in self._zone_waypoints:
             _wp = self._zone_waypoints[dest_name]
             wx, wy = _wp.x, _wp.y
-            self.agent_ctx.plan.active = PlanType.TRAVEL
-            self.agent_ctx.plan.travel = TravelPlan(
-                destination=dest_name, waypoint=True, target_x=wx, target_y=wy
-            )
+            ctx.plan.active = PlanType.TRAVEL
+            ctx.plan.travel = TravelPlan(destination=dest_name, waypoint=True, target_x=wx, target_y=wy)
             return {"ok": True, "destination": dest_name}
         if not self._zone_graph:
             return {"error": "Zone graph not loaded"}
         route = self._zone_graph.find_route(self.current_zone, dest_name)
         if not route:
             return {"error": f"No route to {dest_name}"}
-        self.agent_ctx.plan.active = PlanType.TRAVEL
-        self.agent_ctx.plan.travel = TravelPlan(destination=dest_name, route=route, hop_index=0)
+        ctx.plan.active = PlanType.TRAVEL
+        ctx.plan.travel = TravelPlan(destination=dest_name, route=route, hop_index=0)
         return {"ok": True, "destination": dest_name, "hops": len(route)}
 
     def goto_corpse(self, pos: Point, name: str = "corpse") -> dict:
         """Navigate the agent to a corpse location."""
-        if not self.agent_running or not self.agent_ctx:
-            return {"error": "Start agent first"}
-        self.agent_ctx.plan.active = PlanType.TRAVEL
-        self.agent_ctx.plan.travel.hop_index = 0
-        self.agent_ctx.plan.set_data(
+        with self._agent_lock:
+            if not self.agent_running or not self.agent_ctx:
+                return {"error": "Start agent first"}
+            ctx = self.agent_ctx
+        ctx.plan.active = PlanType.TRAVEL
+        ctx.plan.travel.hop_index = 0
+        ctx.plan.set_data(
             {
                 "destination": f"corpse: {name}",
                 "waypoint": True,
@@ -238,11 +240,13 @@ class AgentOrchestrator:
 
     def _check_brain_crash_recovery(self) -> None:
         """Auto-restart brain thread if unhealthy for 30s. Max 3 per session."""
-        if not self.agent_running or not self._runner:
-            self._brain_unhealthy_since = 0.0
-            return
+        with self._agent_lock:
+            if not self.agent_running or not self._runner:
+                self._brain_unhealthy_since = 0.0
+                return
+            runner = self._runner
 
-        if self._runner.brain_healthy:
+        if runner.brain_healthy:
             self._brain_unhealthy_since = 0.0
             return
 
@@ -265,7 +269,7 @@ class AgentOrchestrator:
             return
 
         self._brain_crash_restarts += 1
-        exc = self._runner.last_exception
+        exc = runner.last_exception
         log.critical(
             "[LIFECYCLE] BRAIN CRASH RECOVERY: brain unhealthy %.0fs, restart %d/%d (error: %s)",
             unhealthy_duration,
@@ -324,8 +328,9 @@ class AgentOrchestrator:
     def start_agent(self) -> dict:
         assert self.reader is not None, "connect() must be called before start_agent()"
         reader = self.reader
-        if self.agent_running:
-            return {"error": "Already running"}
+        with self._agent_lock:
+            if self.agent_running:
+                return {"error": "Already running"}
         # Guard: ensure previous brain thread is fully dead before starting new one
         if self.agent_thread and self.agent_thread.is_alive():
             log.warning("[LIFECYCLE] start_agent: previous brain thread still alive -- waiting")
@@ -482,15 +487,32 @@ class AgentOrchestrator:
             self.agent_defeats = defeats
 
     def stop_agent(self) -> dict:
-        if not self.agent_running:
-            return {"error": "Not running"}
+        with self._agent_lock:
+            if not self.agent_running:
+                return {"error": "Not running"}
         self.stop_event.set()
         if self.agent_thread:
+            # First wait: cooperative shutdown via stop_event (should be fast
+            # now that TickClock and warmup sleeps are interruptible).
             self.agent_thread.join(timeout=10)
             if self.agent_thread.is_alive():
-                log.warning(
-                    "[LIFECYCLE] stop_agent: brain thread did not stop within 10s -- it will be orphaned"
+                log.warning("[LIFECYCLE] stop_agent: brain thread did not stop within 10s -- waiting longer")
+                # Second wait: allow cleanup callbacks (file I/O) to finish.
+                self.agent_thread.join(timeout=20)
+            if self.agent_thread.is_alive():
+                # Thread is truly stuck (hung syscall, deadlock).  Keep the
+                # reference so start_agent() still refuses to create a
+                # duplicate runner -- the daemon flag ensures it dies at
+                # process exit.
+                log.error(
+                    "[LIFECYCLE] stop_agent: brain thread stuck after 30s -- "
+                    "thread kept alive (daemon); start_agent will block until it exits"
                 )
+                with self._agent_lock:
+                    self.agent_running = False
+                    defeats = self.agent_defeats
+                self.add_log(f"Agent stopped -- {defeats} defeats (thread stuck, will block next start)")
+                return {"running": False, "defeats": defeats, "stuck_thread": True}
             self.agent_thread = None
         with self._agent_lock:
             self.agent_running = False
@@ -569,7 +591,9 @@ class AgentOrchestrator:
             return {"error": f"Config reload failed: {e}"}
 
     def shutdown(self) -> None:
-        if self.agent_running:
+        with self._agent_lock:
+            running = self.agent_running
+        if running:
             self.stop_agent()
         if self.reader:
             self.reader.close()

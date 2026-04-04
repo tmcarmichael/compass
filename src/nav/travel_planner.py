@@ -147,8 +147,8 @@ def _plan_via_waypoint_graph(
     threshold: float,
 ) -> list[TravelLeg] | None:
     """Build travel legs using waypoint graph BFS. Returns None if not applicable."""
-    start_node = waypoint_graph.nearest_node(start_x, start_y, threshold)
-    target_node = waypoint_graph.nearest_node(target_x, target_y, threshold)
+    start_node = waypoint_graph.nearest_node(Point(start_x, start_y, 0.0), threshold)
+    target_node = waypoint_graph.nearest_node(Point(target_x, target_y, 0.0), threshold)
 
     if not start_node or not target_node:
         log.debug(

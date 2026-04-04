@@ -626,15 +626,13 @@ class TestShouldReposition:
 class TestDistanceToCamp:
     def test_at_camp(self) -> None:
         ctx = AgentContext()
-        ctx.camp.camp_x = 100.0
-        ctx.camp.camp_y = 200.0
+        ctx.camp.camp_pos = Point(100.0, 200.0, 0.0)
         state = make_game_state(x=100.0, y=200.0)
         assert ctx.camp.distance_to_camp(state) == pytest.approx(0.0)
 
     def test_away_from_camp(self) -> None:
         ctx = AgentContext()
-        ctx.camp.camp_x = 0.0
-        ctx.camp.camp_y = 0.0
+        ctx.camp.camp_pos = Point(0.0, 0.0, 0.0)
         state = make_game_state(x=300.0, y=400.0)
         assert ctx.camp.distance_to_camp(state) > 0
 

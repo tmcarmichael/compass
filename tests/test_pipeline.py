@@ -293,7 +293,7 @@ class TestPipelineFaultInjection:
         # Must not raise  -- GameState.hp_pct returns 1.0 when hp_max=0
 
     def test_routine_exception_recovery(self) -> None:
-        """If a routine's tick() raises, brain should not permanently break."""
+        """If a routine's tick() raises, brain catches it and treats as FAILURE."""
         from routines.base import RoutineBase as _RB
         from routines.base import RoutineStatus as _RS
 
@@ -317,17 +317,15 @@ class TestPipelineFaultInjection:
         brain.add_rule("BROKEN", lambda s: True, broken)
 
         state = make_game_state()
-        # First tick: routine raises  -- brain should handle it
-        try:
-            brain.tick(state)
-        except RuntimeError:
-            pass  # acceptable: brain may propagate or catch
+        # First tick: routine raises -- brain catches and treats as FAILURE
+        brain.tick(state)  # must NOT raise
+        assert brain._active is None  # broken routine deactivated
 
         # Second tick: brain should still function
         brain.tick(state)
 
     def test_rule_condition_exception_skips_rule(self) -> None:
-        """If a rule's condition function raises, other rules still evaluate."""
+        """If a rule's condition function raises, brain skips it and evaluates others."""
         from routines.base import RoutineBase as _RB2
         from routines.base import RoutineStatus as _RS2
 
@@ -350,8 +348,6 @@ class TestPipelineFaultInjection:
         brain.add_rule("FALLBACK", lambda s: True, _Stub())
 
         state = make_game_state()
-        # Brain should not crash even if first rule's condition throws
-        try:
-            brain.tick(state)
-        except ValueError:
-            pass  # if brain propagates, that's acceptable behavior too
+        # Brain catches the broken condition and falls through to FALLBACK
+        brain.tick(state)  # must NOT raise
+        assert brain._active_name == "FALLBACK"

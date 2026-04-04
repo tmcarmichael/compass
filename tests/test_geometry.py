@@ -120,13 +120,13 @@ class TestHeadingTo:
     @given(x1=eq_coord, y1=eq_coord, x2=eq_coord, y2=eq_coord)
     def test_output_range(self, x1: float, y1: float, x2: float, y2: float) -> None:
         assume(distance_2d(x1, y1, x2, y2) > 0.01)
-        result = heading_to(x1, y1, x2, y2)
+        result = heading_to(Point(x1, y1, 0.0), Point(x2, y2, 0.0))
         assert 0.0 <= result <= 512.0  # float precision: boundary can hit 512.0
 
     def test_cardinal_south(self) -> None:
         # Y+ is south in EQ, heading 0 = south
         # Due south: target has higher y
-        h = heading_to(0, 0, 0, 100)
+        h = heading_to(Point(0.0, 0.0, 0.0), Point(0.0, 100.0, 0.0))
         assert h == pytest.approx(0.0, abs=1.0) or h == pytest.approx(512.0, abs=1.0)
 
 
@@ -177,19 +177,19 @@ class TestPointToSegment:
 class TestPointToPolyline:
     def test_single_segment(self) -> None:
         wps = [Point(0.0, 0.0, 0.0), Point(10.0, 0.0, 0.0)]
-        dist, nx, ny, seg_idx, path_t = point_to_polyline(5, 3, wps)
+        dist, nx, ny, seg_idx, path_t = point_to_polyline(Point(5.0, 3.0, 0.0), wps)
         assert dist == pytest.approx(3.0)
         assert seg_idx == 0
         assert 0.0 <= path_t <= 1.0
 
     def test_path_t_near_start(self) -> None:
         wps = [Point(0.0, 0.0, 0.0), Point(100.0, 0.0, 0.0), Point(200.0, 0.0, 0.0)]
-        _, _, _, _, path_t = point_to_polyline(1, 0, wps)
+        _, _, _, _, path_t = point_to_polyline(Point(1.0, 0.0, 0.0), wps)
         assert path_t < 0.1
 
     def test_path_t_near_end(self) -> None:
         wps = [Point(0.0, 0.0, 0.0), Point(100.0, 0.0, 0.0), Point(200.0, 0.0, 0.0)]
-        _, _, _, _, path_t = point_to_polyline(199, 0, wps)
+        _, _, _, _, path_t = point_to_polyline(Point(199.0, 0.0, 0.0), wps)
         assert path_t > 0.9
 
 
@@ -275,3 +275,37 @@ class TestPoint3DDistance:
         b = Point(x2, y2, z2)
         c = Point(x3, y3, z3)
         assert a.dist_to(c) <= a.dist_to(b) + b.dist_to(c) + 1e-9
+
+
+class TestPointDist2D:
+    """Verify 2D distance via Point.dist_2d."""
+
+    def test_basic_2d(self) -> None:
+        a = Point(0.0, 0.0, 0.0)
+        b = Point(3.0, 4.0, 99.0)
+        assert a.dist_2d(b) == pytest.approx(5.0)
+
+    def test_ignores_z(self) -> None:
+        a = Point(0.0, 0.0, 0.0)
+        b = Point(0.0, 0.0, 100.0)
+        assert a.dist_2d(b) == pytest.approx(0.0)
+
+    def test_self_distance_is_zero(self) -> None:
+        p = Point(42.0, -17.0, 100.0)
+        assert p.dist_2d(p) == 0.0
+
+    @given(x1=eq_coord, y1=eq_coord, z1=eq_coord, x2=eq_coord, y2=eq_coord, z2=eq_coord)
+    def test_matches_distance_2d_function(
+        self, x1: float, y1: float, z1: float, x2: float, y2: float, z2: float
+    ) -> None:
+        """Point.dist_2d must agree with distance_2d(x1, y1, x2, y2)."""
+        a = Point(x1, y1, z1)
+        b = Point(x2, y2, z2)
+        assert a.dist_2d(b) == pytest.approx(distance_2d(x1, y1, x2, y2))
+
+    @given(x1=eq_coord, y1=eq_coord, z1=eq_coord, x2=eq_coord, y2=eq_coord, z2=eq_coord)
+    def test_leq_3d(self, x1: float, y1: float, z1: float, x2: float, y2: float, z2: float) -> None:
+        """2D distance is always <= 3D distance."""
+        a = Point(x1, y1, z1)
+        b = Point(x2, y2, z2)
+        assert a.dist_2d(b) <= a.dist_to(b) + 1e-9

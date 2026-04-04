@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from core.types import Point
+from core.types import Point
 
 HEADING_MAX = 512.0
 HEADING_HALF = 256.0
@@ -66,8 +64,7 @@ def point_to_segment(
 
 
 def point_to_polyline(
-    px: float,
-    py: float,
+    p: Point,
     waypoints: Sequence[Point],
 ) -> tuple[float, float, float, int, float]:
     """Closest point on a polyline to point P (XY projection).
@@ -76,6 +73,7 @@ def point_to_polyline(
     path_t in [0.0, 1.0] is the fractional position along the total path
     length (0.0 = first waypoint, 1.0 = last waypoint).
     """
+    px, py = p.x, p.y
     if len(waypoints) < 2:
         if waypoints:
             w = waypoints[0]
@@ -111,16 +109,16 @@ def point_to_polyline(
     return (best_dist, best_nx, best_ny, best_seg, best_path_t)
 
 
-def heading_to(from_x: float, from_y: float, to_x: float, to_y: float) -> float:
-    """Calculate the EQ heading from one point to another.
+def heading_to(from_pt: Point, to_pt: Point) -> float:
+    """Calculate the EQ heading from one point to another (XY plane).
 
     Uses atan2 and converts to EQ's 0-512 heading system.
     Heading 0 = North (+Y direction). 128=West, 256=South, 384=East.
     Heading increases CCW (left turn).
     atan2(dx, dy) gives angle from +Y axis  -  matches heading 0 = +Y.
     """
-    dx = to_x - from_x
-    dy = to_y - from_y
+    dx = to_pt.x - from_pt.x
+    dy = to_pt.y - from_pt.y
 
     angle_rad = math.atan2(dx, dy)
     heading = (angle_rad / (2 * math.pi)) * HEADING_MAX

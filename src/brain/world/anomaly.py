@@ -126,7 +126,7 @@ class AnomalyDetector:
     def _check_camp_drift(self, state: GameState, now: float, issues: list[Issue]) -> None:
         """Detect when agent has drifted too far from camp center."""
         ctx = self.ctx
-        if not ctx.camp.camp_x and not ctx.camp.camp_y:
+        if not ctx.camp.camp_pos.x and not ctx.camp.camp_pos.y:
             return
         dist = ctx.camp.distance_to_camp(state)
         if dist > 300 and not self._debounced(IssueType.CAMP_DRIFT, now):
@@ -134,7 +134,7 @@ class AnomalyDetector:
             issues.append(
                 Issue(
                     type=IssueType.CAMP_DRIFT,
-                    message=f"Camp drift {dist:.0f}u (camp at {ctx.camp.camp_x:.0f},{ctx.camp.camp_y:.0f})",
+                    message=f"Camp drift {dist:.0f}u (camp at {ctx.camp.camp_pos.x:.0f},{ctx.camp.camp_pos.y:.0f})",
                     severity=severity,
                     timestamp=now,
                 )
@@ -145,8 +145,8 @@ class AnomalyDetector:
 
                 if ctx.plan.active not in (PlanType.TRAVEL, PlanType.NEEDS_MEMORIZE):
                     ctx.plan.active = PlanType.TRAVEL
-                    ctx.plan.travel.target_x = ctx.camp.camp_x
-                    ctx.plan.travel.target_y = ctx.camp.camp_y
+                    ctx.plan.travel.target_x = ctx.camp.camp_pos.x
+                    ctx.plan.travel.target_y = ctx.camp.camp_pos.y
                     self._corrections_applied += 1
                     log.warning(
                         "[PERCEPTION] ANOMALY correction: set TRAVEL plan to camp (drift=%.0fu)", dist

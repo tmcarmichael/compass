@@ -14,13 +14,10 @@ from perception.state import GameState
 class CampConfig:
     """Spatial anchors: where to hunt, where to flee, what's dangerous."""
 
-    camp_x: float = 0.0
-    camp_y: float = 0.0
+    camp_pos: Point = Point(0.0, 0.0, 0.0)
     roam_radius: float = 250.0
-    guard_x: float = 0.0
-    guard_y: float = 0.0
-    flee_x: float = 0.0
-    flee_y: float = 0.0
+    guard_pos: Point = Point(0.0, 0.0, 0.0)
+    flee_pos: Point = Point(0.0, 0.0, 0.0)
     flee_waypoints: list[Point] = field(default_factory=list)
     hunt_min_dist: float = 50.0
     hunt_max_dist: float = 300.0
@@ -40,22 +37,22 @@ class CampConfig:
     def distance_to_camp(self, state: GameState) -> float:
         """Distance to camp area. Returns 0 if inside the camp zone."""
         if self.camp_type == CampType.LINEAR and len(self.patrol_waypoints) >= 2:
-            dist: float = point_to_polyline(state.x, state.y, self.patrol_waypoints)[0]
+            dist: float = point_to_polyline(state.pos, self.patrol_waypoints)[0]
             return max(0.0, dist - self.corridor_width)
         # CIRCULAR: bounds-aware
         if self._inside_bounds(state.pos):
             return 0.0
-        return state.pos.dist_to(Point(self.camp_x, self.camp_y, 0.0))
+        return state.pos.dist_2d(self.camp_pos)
 
     def effective_camp_distance(self, pos: Point) -> float:
         """Distance from camp area for scoring. Returns 0 if inside."""
         if self.camp_type == CampType.LINEAR and len(self.patrol_waypoints) >= 2:
-            dist: float = point_to_polyline(pos.x, pos.y, self.patrol_waypoints)[0]
+            dist: float = point_to_polyline(pos, self.patrol_waypoints)[0]
             return max(0.0, dist - self.corridor_width)
         # CIRCULAR: bounds-aware
         if self._inside_bounds(pos):
             return 0.0
-        return pos.dist_to(Point(self.camp_x, self.camp_y, 0.0))
+        return pos.dist_2d(self.camp_pos)
 
     def patrol_position(self, pos: Point) -> float:
         """Fractional position along the patrol path (0.0 to 1.0).
@@ -64,7 +61,7 @@ class CampConfig:
         """
         if self.camp_type != CampType.LINEAR or len(self.patrol_waypoints) < 2:
             return 0.0
-        frac: float = point_to_polyline(pos.x, pos.y, self.patrol_waypoints)[4]
+        frac: float = point_to_polyline(pos, self.patrol_waypoints)[4]
         return frac
 
     def nearest_point_on_path(self, pos: Point) -> Point:
@@ -73,8 +70,8 @@ class CampConfig:
         For CIRCULAR camps, returns camp center.
         """
         if self.camp_type != CampType.LINEAR or len(self.patrol_waypoints) < 2:
-            return Point(self.camp_x, self.camp_y, 0.0)
-        _, nx, ny, _, _ = point_to_polyline(pos.x, pos.y, self.patrol_waypoints)
+            return self.camp_pos
+        _, nx, ny, _, _ = point_to_polyline(pos, self.patrol_waypoints)
         return Point(nx, ny, 0.0)
 
     def point_along_path(self, path_t: float) -> Point:
@@ -84,7 +81,7 @@ class CampConfig:
         """
         wps = self.patrol_waypoints
         if len(wps) < 2:
-            return Point(self.camp_x, self.camp_y, 0.0)
+            return self.camp_pos
         path_t = max(0.0, min(1.0, path_t))
 
         # Compute segment lengths

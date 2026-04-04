@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from hypothesis import strategies as st
 
 from brain.goap.world_state import PlanWorldState
+from core.types import Point
 from perception.state import GameState, SpawnData
 
 if TYPE_CHECKING:
@@ -109,8 +110,8 @@ def make_mob_profile(**overrides: Any) -> MobProfile:
         social_npc_count=0,
         is_moving=False,
         speed=0.0,
-        velocity=(0.0, 0.0),
-        predicted_pos_5s=(spawn.x, spawn.y),
+        velocity=(0.0, 0.0, 0.0),
+        predicted_pos_5s=Point(spawn.x, spawn.y, spawn.z),
         fight_duration_est=30.0,
         mana_cost_est=200,
         threat_level=0.0,

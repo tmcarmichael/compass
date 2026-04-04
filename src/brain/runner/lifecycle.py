@@ -373,6 +373,9 @@ class LifecycleHandler:
             if state.mana_current == 0:
                 brain_log.info("[LIFECYCLE] Warmup: mana reads 0, retrying CHARINFO...")
                 for _retry in range(5):
+                    if _stopped():
+                        brain_log.info("[LIFECYCLE] Warmup mana retry interrupted by stop_event")
+                        return
                     time.sleep(1.0)
                     state = self._runner._reader.read_state(include_spawns=True)
                     if state.mana_current > 0:

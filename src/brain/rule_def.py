@@ -39,7 +39,7 @@ class RuleDef:
     # Phase 3+: weight for cross-tier scoring
     weight: float = 1.0
     # Phase 4: considerations (list of Consideration objects)
-    considerations: list = field(default_factory=list)
+    considerations: list[Consideration] = field(default_factory=list)
     # Circuit breaker: max failures in window before tripping (0 = disabled)
     breaker_max_failures: int = 5
     breaker_window: float = 300.0
@@ -74,7 +74,7 @@ def score_from_considerations(
     weight_sum = 0.0
     for c in considerations:
         raw = c.input_fn(state, ctx)
-        mapped = c.curve(raw)
+        mapped = max(0.0, min(c.curve(raw), 1.0))
         if mapped <= 0.0:
             return 0.0  # hard gate
         total_log += c.weight * math.log(mapped)

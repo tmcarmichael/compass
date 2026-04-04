@@ -38,6 +38,7 @@ from nav.pathfinding import (
     vary_path,
 )
 from nav.terrain.heightmap import (
+    SURFACE_BRIDGE,
     SURFACE_OBSTACLE,
     SURFACE_WALKABLE,
     SURFACE_WATER,
@@ -774,7 +775,7 @@ class TestFindPath:
         gx1, gy1 = _grid_to_game(t, 25, 25)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, gx1, gy1, jitter=0.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), jitter=0.0)
         assert path is not None
         assert len(path) >= 2
         # Start and end should be near the requested positions
@@ -792,7 +793,7 @@ class TestFindPath:
         gx1, gy1 = _grid_to_game(t, 20, 15)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, gx1, gy1, jitter=0.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), jitter=0.0)
         assert path is not None
         assert len(path) >= 2
 
@@ -805,7 +806,7 @@ class TestFindPath:
         gx1, gy1 = _grid_to_game(t, 20, 13)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, gx1, gy1, jitter=0.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), jitter=0.0)
         assert path is not None
 
     def test_start_off_grid_returns_none(self):
@@ -814,7 +815,7 @@ class TestFindPath:
         # Game coords that map to a cell way off grid
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, -100.0, -100.0, 5.0, 5.0)
+            path = find_path(t, Point(-100.0, -100.0, 0.0), Point(5.0, 5.0, 0.0))
         assert path is None
 
     def test_goal_off_grid_returns_none(self):
@@ -823,7 +824,7 @@ class TestFindPath:
         gx0, gy0 = _grid_to_game(t, 5, 5)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, -100.0, -100.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(-100.0, -100.0, 0.0))
         assert path is None
 
     def test_start_blocked_snaps_to_walkable(self):
@@ -834,7 +835,7 @@ class TestFindPath:
         gx1, gy1 = _grid_to_game(t, 20, 20)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, gx1, gy1, jitter=0.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), jitter=0.0)
         assert path is not None
         assert len(path) >= 2
 
@@ -849,7 +850,7 @@ class TestFindPath:
         gx1, gy1 = _grid_to_game(t, 25, 15)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx0, gy0, gx1, gy1, max_nodes=10000, jitter=0.0)
+            path = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), max_nodes=10000, jitter=0.0)
         assert path is None
 
     def test_same_start_and_goal(self):
@@ -858,7 +859,7 @@ class TestFindPath:
         gx, gy = _grid_to_game(t, 10, 10)
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
-            path = find_path(t, gx, gy, gx, gy, jitter=0.0)
+            path = find_path(t, Point(gx, gy, 0.0), Point(gx, gy, 0.0), jitter=0.0)
         assert path is not None
         assert len(path) >= 1
         # Path should be very short -- just the point itself
@@ -872,7 +873,7 @@ class TestFindPath:
         with patch("core.features.flags") as mock_flags:
             mock_flags.obstacle_avoidance = True
             # Very low node limit -- should hit it on a 50x50 grid
-            result = find_path(t, gx0, gy0, gx1, gy1, max_nodes=1, jitter=0.0)
+            result = find_path(t, Point(gx0, gy0, 0.0), Point(gx1, gy1, 0.0), max_nodes=1, jitter=0.0)
         # With max_nodes=1 JPS gets one expansion, then hits the limit.
         # The A* fallback also gets max_nodes=1. Very likely returns None.
         assert result is None
@@ -1003,3 +1004,115 @@ class TestFindPathAstar:
             )
         assert path is not None
         assert len(path) <= 3
+
+
+# ------------------------------------------------------------------
+# Z-level filtering (multi-level terrain regression)
+# ------------------------------------------------------------------
+
+
+def _bridge_grid(cols: int, rows: int) -> ZoneTerrain:
+    """Create a grid with a bridge spanning columns 8-12 at Z=50.
+
+    Ground level is Z=0 everywhere.  Columns 8-12 have a bridge
+    (Z_ceiling=50) and the ground below is water (unwalkable at ground
+    level).  An agent on the ground should path AROUND the bridge, not
+    through the water cells.  An agent on the bridge should cross it.
+    """
+    from nav.terrain.heightmap import MAT_UNKNOWN
+
+    t = ZoneTerrain(cell_size=1.0)
+    t._min_x = 0.0
+    t._min_y = 0.0
+    t._cols = cols
+    t._rows = rows
+    total = cols * rows
+    t._z = [0.0] * total
+    t._z_ceiling = [float("nan")] * total
+    t._flags = [SURFACE_WALKABLE] * total
+    t._normal_z = [0.9] * total
+    t._material_id = [MAT_UNKNOWN] * total
+    t._region_id = [0] * total
+
+    # Columns 8-12, rows 5 to rows-6: bridge deck at Z=50, water at ground level.
+    # Leaves gaps at top and bottom so ground-level agents can walk around.
+    for r in range(5, rows - 5):
+        for c in range(8, 13):
+            idx = r * cols + c
+            t._flags[idx] = SURFACE_BRIDGE | SURFACE_WALKABLE | SURFACE_WATER
+            t._z[idx] = 0.0  # ground (water underneath)
+            t._z_ceiling[idx] = 50.0  # bridge deck
+
+    t._build_walk_bits()
+    return t
+
+
+class TestZLevelFiltering:
+    """Verify pathfinding respects the agent's vertical level."""
+
+    def test_ground_agent_avoids_bridge_cells(self):
+        """Agent at Z=0 should not path through bridge cells at Z=50."""
+        t = _bridge_grid(30, 30)
+        gx0, gy0 = _grid_to_game(t, 2, 15)
+        gx1, gy1 = _grid_to_game(t, 28, 15)
+        start = Point(gx0, gy0, 0.0)  # ground level
+        goal = Point(gx1, gy1, 0.0)
+
+        with patch("core.features.flags") as mock_flags:
+            mock_flags.obstacle_avoidance = True
+            path = find_path(t, start, goal, jitter=0.0)
+
+        assert path is not None
+        # No waypoint should be in an actual bridge cell (cols 8-12, rows 5-24).
+        # The path may pass through cols 8-12 at rows outside the bridge
+        # (the gap at top/bottom) -- that's correct routing around the bridge.
+        for wp in path:
+            col, row = t._game_to_grid(wp.x, wp.y)
+            in_bridge = 8 <= col <= 12 and 5 <= row <= 24
+            assert not in_bridge, f"ground path crossed bridge at col={col} row={row}"
+
+    def test_bridge_agent_crosses_bridge(self):
+        """Agent at Z=50 should path straight across the bridge."""
+        t = _bridge_grid(30, 30)
+        gx0, gy0 = _grid_to_game(t, 2, 15)
+        gx1, gy1 = _grid_to_game(t, 28, 15)
+        start = Point(gx0, gy0, 50.0)  # bridge level
+        goal = Point(gx1, gy1, 50.0)
+
+        with patch("core.features.flags") as mock_flags:
+            mock_flags.obstacle_avoidance = True
+            path = find_path(t, start, goal, jitter=0.0)
+
+        assert path is not None
+        # Path should go through the bridge (shorter than going around)
+        cols_visited = {t._game_to_grid(wp.x, wp.y)[0] for wp in path}
+        assert any(8 <= c <= 12 for c in cols_visited), "bridge-level path should cross the bridge"
+
+    def test_snap_respects_z_level(self):
+        """_snap_to_walkable should not snap to wrong-floor cells."""
+        t = _bridge_grid(20, 20)
+        # Cell (10, 10) is a bridge cell.  At ground Z=0, it should be
+        # rejected and snap to a non-bridge neighbor.
+        with patch("core.features.flags") as mock_flags:
+            mock_flags.obstacle_avoidance = True
+            result = _snap_to_walkable(t, 10, 10, radius=5, near_z=0.0)
+
+        assert result is not None
+        sc, sr = result
+        assert sc < 8 or sc > 12, f"snapped to bridge column {sc} at ground level"
+
+    def test_z_filtered_bitfield_blocks_wrong_floor(self):
+        """build_walk_bits_z should mark bridge cells unwalkable for ground agents."""
+        t = _bridge_grid(20, 20)
+        wb, wbc = t.build_walk_bits_z(near_z=0.0)
+        cols = t._cols
+        rows = t._rows
+        # Bridge rows (5 to rows-6) at columns 8-12 should be blocked at ground level
+        for r in range(5, rows - 5):
+            for c in range(8, 13):
+                assert not _bit_walkable(wb, wbc, c, r, cols, rows), (
+                    f"bridge cell ({c},{r}) should be blocked at Z=0"
+                )
+        # Non-bridge columns should be walkable
+        assert _bit_walkable(wb, wbc, 5, 10, cols, rows)
+        assert _bit_walkable(wb, wbc, 15, 10, cols, rows)

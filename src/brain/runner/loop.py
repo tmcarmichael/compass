@@ -271,7 +271,7 @@ class BrainRunner:
         self._init_monitoring()
 
         tick_rate = self._config["general"].get("tick_rate_hz", 10)
-        self._clock = TickClock(tick_rate)
+        self._clock = TickClock(tick_rate, stop_event=self._stop_event)
         self._next_snapshot = time.time() + 30.0
         self._next_tuning_eval = time.time() + 1800.0
 
@@ -325,36 +325,52 @@ class BrainRunner:
             ctx.metrics.flee_count,
         )
 
-        # ExitStack ensures each cleanup runs even if a prior one throws
+        # ExitStack ensures each cleanup runs even if a prior one throws.
+        # _named_callback wraps each one so failures identify the step.
         with ExitStack() as cleanup:
-            cleanup.callback(lambda: brain_log.log(EVENT, "[LIFECYCLE] Brain loop ended"))
+
+            def _named_callback(name: str, fn: Callable[[], object]) -> None:
+                """Register fn so any exception logs which handler failed."""
+
+                def _wrapper() -> None:
+                    try:
+                        fn()
+                    except Exception:
+                        brain_log.warning("[LIFECYCLE] Cleanup handler '%s' failed", name, exc_info=True)
+
+                cleanup.callback(_wrapper)
+
+            _named_callback("brain_loop_ended", lambda: brain_log.log(EVENT, "[LIFECYCLE] Brain loop ended"))
             if ctx.zone.zone_knowledge and hasattr(ctx.zone.zone_knowledge, "save"):
-                cleanup.callback(ctx.zone.zone_knowledge.save)
+                _named_callback("zone_knowledge_save", ctx.zone.zone_knowledge.save)
             if ctx.fight_history:
                 fh = ctx.fight_history
-                cleanup.callback(lambda: brain_log.info(fh.summary()))
-                cleanup.callback(fh.save)
+                _named_callback("fight_history_summary", lambda: brain_log.info(fh.summary()))
+                _named_callback("fight_history_save", fh.save)
             if self._gradient_tuner is not None:
                 tuner = self._gradient_tuner
                 zone = self._current_zone
-                cleanup.callback(
+                _named_callback(
+                    "learned_weights_save",
                     lambda: save_learned_weights(
                         tuner.get_weight_snapshot(), zone, learning_rates=tuner.get_learning_rates()
-                    )
+                    ),
                 )
             if self._goap_planner is not None:
                 planner = self._goap_planner
                 zone = self._current_zone
-                cleanup.callback(lambda: brain_log.info("[LIFECYCLE] %s", planner.stats_summary()))
-                cleanup.callback(lambda: _save_goap_costs(planner, zone))
+                _named_callback(
+                    "goap_stats_summary", lambda: brain_log.info("[LIFECYCLE] %s", planner.stats_summary())
+                )
+                _named_callback("goap_costs_save", lambda: _save_goap_costs(planner, zone))
             if ctx.spatial_memory:
-                cleanup.callback(ctx.spatial_memory.save)
-            cleanup.callback(lambda: brain_log.info(ctx.session_summary()))
+                _named_callback("spatial_memory_save", ctx.spatial_memory.save)
+            _named_callback("session_summary", lambda: brain_log.info(ctx.session_summary()))
             # Session memory: record this session's performance
             sm = self._session_memory
-            cleanup.callback(lambda: self._record_session_to_memory(ctx, sm))
+            _named_callback("session_memory_record", lambda: self._record_session_to_memory(ctx, sm))
             # Session report JSON
-            cleanup.callback(lambda: self._write_session_report(ctx, self._session_dir))
+            _named_callback("session_report_json", lambda: self._write_session_report(ctx, self._session_dir))
 
     @staticmethod
     def _record_session_to_memory(ctx: AgentContext, sm: SessionMemory) -> None:
@@ -482,7 +498,7 @@ class BrainRunner:
 
                 move_forward_stop()
                 move_backward_stop()
-                if self._brain._active:
+                if self._brain.active_routine:
                     self._brain.shutdown(state)
             except Exception as e:
                 brain_log.debug("[LIFECYCLE] Crash recovery key release failed: %s", e)
@@ -510,9 +526,9 @@ class BrainRunner:
                 state=state,
                 rule_eval=self._brain.last_rule_eval,
                 rule_scores=self._brain.rule_scores,
-                selected=self._brain._last_matched_rule,
-                active=self._brain._active_name,
-                locked=self._brain._active.locked if self._brain._active else False,
+                selected=self._brain.last_matched_rule,
+                active=self._brain.active_routine_name,
+                locked=self._brain.active_routine.locked if self._brain.active_routine else False,
                 tick_ms=self._brain.tick_total_ms,
                 routine_ms=self._brain.routine_tick_ms,
                 engaged=ctx.combat.engaged,
@@ -522,7 +538,7 @@ class BrainRunner:
             ctx.diag.forensics.record_tick(
                 tick_id=self._clock.tick_count,
                 state=state,
-                active_routine=self._brain._active_name,
+                active_routine=self._brain.active_routine_name,
                 engaged=ctx.combat.engaged,
             )
         if ctx.diag.metrics:
@@ -530,11 +546,64 @@ class BrainRunner:
         if ctx.diag.invariants:
             ctx.diag.invariants.check(self._clock.tick_count, state, ctx)
         if self.on_display_update:
-            self.on_display_update(self._brain._active_name or "", ctx.defeat_tracker.defeats)
+            self.on_display_update(self._brain.active_routine_name or "", ctx.defeat_tracker.defeats)
+
+    def _tick_world_and_events(self, state: GameState, ctx: AgentContext) -> TickSignal | None:
+        """Update world model, handle level-ups, detect adds, track XP.
+
+        Returns a TickSignal if the loop should break/continue, or None to proceed.
+        """
+        self._world_updater.update_world_state(state, ctx, self._health_monitor, self._state_tracker)
+
+        if (
+            state.level != self._prev_level
+            and self._prev_level > 0
+            and abs(state.level - self._prev_level) == 1
+        ):
+            self._tick_handlers.handle_level_up(state, ctx)
+        self._prev_level = state.level
+
+        now = time.time()
+        self._reporter.track_xp(state, ctx, now)
+        self._tick_handlers.detect_adds(state, ctx)
+        self._tick_handlers.scan_auto_engage(state, ctx)
+
+        zone_signal = self._lifecycle.check_zoning_recovery(state, ctx)
+        if zone_signal == TickSignal.BREAK:
+            return TickSignal.BREAK
+        if zone_signal == TickSignal.CONTINUE:
+            return TickSignal.CONTINUE
+
+        if self._world_updater.check_player_status(state, ctx):
+            return TickSignal.BREAK
+
+        if self._tick_periodic_snapshot(state, ctx, now):
+            return TickSignal.BREAK
+
+        return None
+
+    def _tick_learning_and_decide(self, state: GameState, ctx: AgentContext) -> TickSignal:
+        """Run learning ticks, GOAP planner, then brain decision.
+
+        Returns BREAK/CONTINUE to stop, or PROCEED on success.
+        """
+        self._learning.tick_tuning_eval(ctx, time.time())
+        self._learning.tick_gradient_learning(ctx)
+
+        goap_suggestion = self._learning.tick_goap_planner(state, ctx, time.time())
+        ctx.diag.goap_suggestion = goap_suggestion if goap_suggestion else ""
+
+        brain_signal = self._tick_brain(state, ctx)
+        if brain_signal is not TickSignal.PROCEED:
+            return brain_signal
+        self._last_heartbeat = time.monotonic()
+        self._tick_record_diag(state, ctx)
+        return TickSignal.PROCEED
 
     def _tick_one(self, ctx: AgentContext) -> tuple[TickSignal, GameState | None]:
         """Execute one iteration of the brain loop.
 
+        Pipeline: clock wait -> pre-state -> world/events -> learning/decide.
         Returns (signal, state) where signal tells the caller whether
         to break, continue, or proceed to the next tick.
         """
@@ -556,47 +625,13 @@ class BrainRunner:
                 return TickSignal.BREAK, state
             return TickSignal.CONTINUE, state
 
-        self._world_updater.update_world_state(state, ctx, self._health_monitor, self._state_tracker)
+        event_signal = self._tick_world_and_events(state, ctx)
+        if event_signal is not None:
+            return event_signal, state
 
-        if (
-            state.level != self._prev_level
-            and self._prev_level > 0
-            and abs(state.level - self._prev_level) == 1
-        ):
-            self._tick_handlers.handle_level_up(state, ctx)
-        self._prev_level = state.level
-
-        now = time.time()
-        self._reporter.track_xp(state, ctx, now)
-        self._tick_handlers.detect_adds(state, ctx)
-        self._tick_handlers.scan_auto_engage(state, ctx)
-
-        zone_signal = self._lifecycle.check_zoning_recovery(state, ctx)
-        if zone_signal == TickSignal.BREAK:
-            return TickSignal.BREAK, state
-        if zone_signal == TickSignal.CONTINUE:
-            return TickSignal.CONTINUE, state
-
-        if self._world_updater.check_player_status(state, ctx):
-            return TickSignal.BREAK, state
-
-        if self._tick_periodic_snapshot(state, ctx, now):
-            return TickSignal.BREAK, state
-
-        self._learning.tick_tuning_eval(ctx, now)
-        self._learning.tick_gradient_learning(ctx)
-
-        # GOAP planner: suggest next action if plan exists
-        goap_suggestion = self._learning.tick_goap_planner(state, ctx, now)
-        ctx.diag.goap_suggestion = goap_suggestion if goap_suggestion else ""
-
-        brain_signal = self._tick_brain(state, ctx)
-        if brain_signal is TickSignal.BREAK:
-            return TickSignal.BREAK, state
-        if brain_signal is TickSignal.CONTINUE:
-            return TickSignal.CONTINUE, state
-        self._last_heartbeat = time.monotonic()
-        self._tick_record_diag(state, ctx)
+        decide_signal = self._tick_learning_and_decide(state, ctx)
+        if decide_signal is not TickSignal.PROCEED:
+            return decide_signal, state
 
         return TickSignal.PROCEED, state
 

@@ -25,8 +25,11 @@ from util.log_tiers import VERBOSE
 
 if TYPE_CHECKING:
     from brain.context import AgentContext
+    from brain.context_views import NavigationView
     from brain.decision import Brain
     from core.types import ReadStateFn
+
+# Helper functions are typed against NavigationView.  See context_views.py.
 
 
 @dataclass
@@ -45,7 +48,7 @@ _skip = SkipLog(log)
 
 def _should_travel(
     state: GameState,
-    ctx: AgentContext,
+    ctx: NavigationView,
     rs: _NavigationRuleState,
 ) -> bool:
     if ctx.plan.active != "travel":
@@ -98,7 +101,7 @@ def _should_travel(
     return True
 
 
-def _score_travel(state: GameState, ctx: AgentContext) -> float:
+def _score_travel(state: GameState, ctx: NavigationView) -> float:
     if ctx.plan.active != "travel":
         return 0.0
     if ctx.combat.engaged:
@@ -106,7 +109,7 @@ def _score_travel(state: GameState, ctx: AgentContext) -> float:
     return 1.0
 
 
-def _should_wander(state: GameState, ctx: AgentContext) -> bool:
+def _should_wander(state: GameState, ctx: NavigationView) -> bool:
     if not flags.wander:
         return False
     if ctx.plan.active is not None:
@@ -133,7 +136,7 @@ def _should_wander(state: GameState, ctx: AgentContext) -> bool:
                 _skip("Wander", "pet fighting")
                 return False
     # If far from camp, set TRAVEL to return rather than wander further
-    if ctx.camp.camp_x or ctx.camp.camp_y:
+    if ctx.camp.camp_pos.x or ctx.camp.camp_pos.y:
         camp_dist = ctx.camp.distance_to_camp(state)
         if camp_dist > 400 and not ctx.combat.engaged:
             from core.types import CampType, PlanType
@@ -144,14 +147,14 @@ def _should_wander(state: GameState, ctx: AgentContext) -> bool:
                 ctx.plan.travel.target_x = nearest.x
                 ctx.plan.travel.target_y = nearest.y
             else:
-                ctx.plan.travel.target_x = ctx.camp.camp_x
-                ctx.plan.travel.target_y = ctx.camp.camp_y
+                ctx.plan.travel.target_x = ctx.camp.camp_pos.x
+                ctx.plan.travel.target_y = ctx.camp.camp_pos.y
             log.info("[POSITION] Wander: outside camp range %.0fu -- returning", camp_dist)
             return False
     return True
 
 
-def _score_wander(state: GameState, ctx: AgentContext) -> float:
+def _score_wander(state: GameState, ctx: NavigationView) -> float:
     if not flags.wander:
         return 0.0
     if ctx.combat.engaged:
@@ -233,8 +236,8 @@ def register(brain: Brain, ctx: AgentContext, read_state_fn: ReadStateFn) -> Non
 
     # WANDER  -  fallback, roam randomly near camp
     wander = WanderRoutine(
-        camp_x=ctx.camp.camp_x,
-        camp_y=ctx.camp.camp_y,
+        camp_x=ctx.camp.camp_pos.x,
+        camp_y=ctx.camp.camp_pos.y,
         read_state_fn=read_state_fn,
         ctx=ctx,
     )

@@ -147,12 +147,9 @@ def apply_camp(ctx: AgentContext, camp: dict[str, Any]) -> None:
         mid = ctx.camp.point_along_path(0.5)
         camp_center = {"x": mid[0], "y": mid[1]}
 
-    ctx.camp.camp_x = camp_center.get("x", 0.0)
-    ctx.camp.camp_y = camp_center.get("y", 0.0)
-    ctx.camp.guard_x = safe_spot.get("x", 0.0)
-    ctx.camp.guard_y = safe_spot.get("y", 0.0)
-    ctx.camp.flee_x = flee_spot.get("x", 0.0)
-    ctx.camp.flee_y = flee_spot.get("y", 0.0)
+    ctx.camp.camp_pos = Point(camp_center.get("x", 0.0), camp_center.get("y", 0.0), 0.0)
+    ctx.camp.guard_pos = Point(safe_spot.get("x", 0.0), safe_spot.get("y", 0.0), 0.0)
+    ctx.camp.flee_pos = Point(flee_spot.get("x", 0.0), flee_spot.get("y", 0.0), 0.0)
     ctx.camp.hunt_min_dist = camp.get("hunt_min_dist", 50.0)
 
     if is_linear:
@@ -163,8 +160,7 @@ def apply_camp(ctx: AgentContext, camp: dict[str, Any]) -> None:
         ctx.camp.hunt_max_dist = camp.get("hunt_max_dist", path_len + ctx.camp.corridor_width)
         # Set guard to path midpoint so guard_dist checks stay sane
         mid = ctx.camp.point_along_path(0.5)
-        ctx.camp.guard_x = mid[0]
-        ctx.camp.guard_y = mid[1]
+        ctx.camp.guard_pos = Point(mid[0], mid[1], 0.0)
         log.info(
             "[TRAVEL] LINEAR camp: %d waypoints, corridor=%.0f, path=%.0fu",
             len(ctx.camp.patrol_waypoints),

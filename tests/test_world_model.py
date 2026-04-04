@@ -39,7 +39,7 @@ class TestMobHistory:
     def test_velocity_insufficient_data(self) -> None:
         h = _MobHistory(spawn_id=1, name="a_bat", positions=deque(), hp_samples=deque())
         h.add(100.0, Point(0.0, 0.0, 0.0))
-        vx, vy = h.velocity()
+        vx, vy, _vz = h.velocity()
         assert vx == 0.0
         assert vy == 0.0
 
@@ -47,7 +47,7 @@ class TestMobHistory:
         h = _MobHistory(spawn_id=1, name="a_bat", positions=deque(), hp_samples=deque())
         h.add(100.0, Point(0.0, 0.0, 0.0))
         h.add(101.0, Point(10.0, 0.0, 0.0))
-        vx, vy = h.velocity()
+        vx, vy, _vz = h.velocity()
         assert abs(vx - 10.0) < 0.1
         assert vy == 0.0
 
@@ -56,7 +56,7 @@ class TestMobHistory:
         h.add(100.0, Point(0.0, 0.0, 0.0))
         h.add(101.0, Point(10.0, 0.0, 0.0))
         spawn = make_spawn(velocity_x=5.0, velocity_y=3.0)
-        vx, vy = h.velocity(spawn)
+        vx, vy, _vz = h.velocity(spawn)
         assert vx == 5.0
         assert vy == 3.0
 
@@ -175,18 +175,18 @@ class TestWorldModelQueries:
 class TestWorldModelHeading:
     def test_is_approaching_stationary_false(self) -> None:
         spawn = make_spawn(x=100.0, y=0.0, speed=0.0, heading=0.0)
-        assert WorldModel.is_approaching(spawn, 0.0, 0.0) is False
+        assert WorldModel.is_approaching(spawn, Point(0.0, 0.0, 0.0)) is False
 
     def test_heading_error_to_facing_target(self) -> None:
         # Heading 0, target straight ahead along x-axis
         spawn = make_spawn(x=0.0, y=0.0, heading=0.0)
-        err = WorldModel.heading_error_to(spawn, 100.0, 0.0)
+        err = WorldModel.heading_error_to(spawn, Point(100.0, 0.0, 0.0))
         # Exact error depends on heading_to implementation, but should be small or 256
         assert 0.0 <= err <= 256.0
 
     def test_heading_error_symmetric(self) -> None:
         spawn = make_spawn(x=0.0, y=0.0, heading=128.0)
-        err = WorldModel.heading_error_to(spawn, 100.0, 0.0)
+        err = WorldModel.heading_error_to(spawn, Point(100.0, 0.0, 0.0))
         assert 0.0 <= err <= 256.0
 
 
@@ -286,8 +286,7 @@ def _make_ctx_for_update(
     """Minimal AgentContext stub for WorldModel.update()."""
     return SimpleNamespace(
         camp=SimpleNamespace(
-            camp_x=camp_x,
-            camp_y=camp_y,
+            camp_pos=Point(camp_x, camp_y, 0.0),
             roam_radius=200.0,
             effective_camp_distance=lambda pos: Point(camp_x, camp_y, 0.0).dist_to(pos),
         ),
@@ -394,8 +393,8 @@ class TestWorldModelUpdate:
         wm = WorldModel(ctx=ctx)
         state = make_game_state(x=100.0, y=200.0, spawns=())
         wm.update(state)
-        assert wm._last_player_x == 100.0
-        assert wm._last_player_y == 200.0
+        assert wm._last_player_pos.x == 100.0
+        assert wm._last_player_pos.y == 200.0
 
     def test_update_records_profiling_time(self) -> None:
         ctx = _make_ctx_for_update()
@@ -536,24 +535,24 @@ class TestWorldModelHeadingWithSpawns:
     def test_is_approaching_moving_toward_player(self) -> None:
         # Heading 0 = North (+Y). Spawn south of player, heading north -> approaching
         spawn = make_spawn(x=0.0, y=-100.0, speed=5.0, heading=0.0)
-        result = WorldModel.is_approaching(spawn, 0.0, 0.0)
+        result = WorldModel.is_approaching(spawn, Point(0.0, 0.0, 0.0))
         assert result is True
 
     def test_is_approaching_moving_away(self) -> None:
         # Heading 256 = South. Spawn south of player, heading further south -> not approaching
         spawn = make_spawn(x=0.0, y=-100.0, speed=5.0, heading=256.0)
-        result = WorldModel.is_approaching(spawn, 0.0, 0.0)
+        result = WorldModel.is_approaching(spawn, Point(0.0, 0.0, 0.0))
         assert result is False
 
     def test_heading_error_facing_directly_at_target(self) -> None:
         # Spawn at origin, heading 0 (north), target is north
         spawn = make_spawn(x=0.0, y=0.0, heading=0.0)
-        err = WorldModel.heading_error_to(spawn, 0.0, 100.0)
+        err = WorldModel.heading_error_to(spawn, Point(0.0, 100.0, 0.0))
         assert err < 10.0  # nearly facing the target
 
     def test_heading_error_facing_away(self) -> None:
         spawn = make_spawn(x=0.0, y=0.0, heading=256.0)
-        err = WorldModel.heading_error_to(spawn, 0.0, 100.0)
+        err = WorldModel.heading_error_to(spawn, Point(0.0, 100.0, 0.0))
         assert err > 200.0  # facing away
 
 
@@ -569,7 +568,7 @@ class TestMobHistoryVelocityTracking:
         h.add(100.0, Point(0.0, 0.0, 0.0))
         h.add(101.0, Point(10.0, 0.0, 0.0))
         spawn = make_spawn(velocity_x=0.0, velocity_y=0.0)
-        vx, vy = h.velocity(spawn)
+        vx, vy, _vz = h.velocity(spawn)
         assert abs(vx - 10.0) < 0.1
 
     def test_velocity_too_short_dt(self) -> None:
@@ -577,7 +576,7 @@ class TestMobHistoryVelocityTracking:
         h = _MobHistory(spawn_id=1, name="a_bat", positions=deque(), hp_samples=deque())
         h.add(100.0, Point(0.0, 0.0, 0.0))
         h.add(100.1, Point(10.0, 0.0, 0.0))
-        vx, vy = h.velocity()
+        vx, vy, _vz = h.velocity()
         assert vx == 0.0
         assert vy == 0.0
 

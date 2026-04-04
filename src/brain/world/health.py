@@ -275,7 +275,7 @@ class HealthMonitor:
             return None
 
         mob_facing = sp.heading  # 0-512 scale
-        angle_to_player = heading_to(sp.x, sp.y, state.x, state.y)
+        angle_to_player = heading_to(sp.pos, state.pos)
         heading_error = abs(mob_facing - angle_to_player) % 512
         if heading_error > 256:
             heading_error = 512 - heading_error

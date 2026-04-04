@@ -38,6 +38,11 @@ SURFACE_CLIFF = 0x0020  # large Z drop to adjacent cell
 SURFACE_OBSTACLE = 0x0040  # static object (tree, rock, building, pillar)
 SURFACE_BRIDGE = 0x0080  # bridge deck (walkable over water, auto-detected)
 
+# Max Z difference between agent and cell surface to consider walkable.
+# Shared with pathfinding (which defines its own copy for module independence).
+_WALKABLE_CLIMB = 15.0
+_NAN = float("nan")
+
 # Material IDs (uint8, stored per cell in v3 cache)
 MAT_UNKNOWN = 0
 MAT_STONE = 1
@@ -267,6 +272,78 @@ class ZoneTerrain:
 
         walkable = sum(bin(b).count("1") for b in wb)
         log.debug("[NAV] Walk bitfield built: %d walkable bits, %d bytes", walkable, len(wb))
+
+    def build_walk_bits_z(self, near_z: float) -> tuple[bytearray, int]:
+        """Build a Z-filtered walkability bitfield for pathfinding.
+
+        Like ``_build_walk_bits`` but rejects cells whose surface Z is
+        too far from *near_z* (the agent's current level).  This prevents
+        paths from routing across bridges or floors the agent is not on.
+
+        Returns ``(bitfield, byte_cols)`` without mutating the cached
+        ``_walk_bits`` (which is Z-agnostic and used elsewhere).
+        """
+        if not self._flags:
+            return bytearray(), 0
+
+        cols = self._cols
+        rows = self._rows
+        byte_cols = (cols + 7) >> 3
+        wb = bytearray(rows * byte_cols)
+        blocked = SURFACE_WATER | SURFACE_LAVA | SURFACE_CLIFF | SURFACE_OBSTACLE
+        has_ceil = bool(self._z_ceiling)
+        _z = self._z
+        _zc = self._z_ceiling
+        climb = _WALKABLE_CLIMB
+
+        for row in range(rows):
+            rb = row * byte_cols
+            rf = row * cols
+            for col in range(cols):
+                idx = rf + col
+                f = self._flags[idx]
+
+                if has_ceil:
+                    z_ceil = _zc[idx]
+                else:
+                    z_ceil = _NAN
+
+                is_multi = z_ceil == z_ceil  # not NaN → multi-level cell
+
+                if is_multi:
+                    # Multi-level cell (bridge, multi-floor): decide
+                    # walkability based on which surface the agent is on.
+                    z_ground = _z[idx]
+                    mid = (z_ground + z_ceil) / 2.0
+                    on_upper = near_z > mid
+                    if on_upper:
+                        # Agent on the upper surface (bridge deck) — walkable
+                        # only if BRIDGE flag is set.
+                        walkable = bool(f & SURFACE_BRIDGE)
+                    else:
+                        # Agent at ground level — walkable only if the
+                        # ground surface itself is walkable (not water/lava
+                        # under a bridge).
+                        walkable = bool((f & SURFACE_WALKABLE) and not (f & blocked))
+                        # Bridge-only cells are not ground-walkable
+                        if (f & SURFACE_BRIDGE) and (f & (SURFACE_WATER | SURFACE_LAVA)):
+                            walkable = False
+                    level_z = z_ceil if on_upper else z_ground
+                    if abs(level_z - near_z) > climb:
+                        walkable = False
+                else:
+                    # Single-level cell: standard walkability check
+                    if f & SURFACE_BRIDGE:
+                        walkable = True
+                    elif (f & SURFACE_WALKABLE) and not (f & blocked):
+                        walkable = True
+                    else:
+                        walkable = False
+
+                if walkable:
+                    wb[rb + (col >> 3)] |= 1 << (col & 7)
+
+        return wb, byte_cols
 
     def invalidate_walk_bits(self) -> None:
         """Force rebuild of the walkability bitfield.
@@ -586,34 +663,25 @@ class ZoneTerrain:
 
     def find_path(
         self,
-        start_x: float,
-        start_y: float,
-        goal_x: float,
-        goal_y: float,
+        start: Point,
+        goal: Point,
         max_nodes: int = 50000,
         jitter: float = 12.0,
-        start_z: float = float("nan"),
     ) -> list[Point] | None:
         """A* pathfind from start to goal through walkable terrain.
 
+        The start point's z coordinate is used for multi-layer terrain
+        selection (bridges, multi-floor buildings).
+
         Args:
+            start: Start position as Point (x, y, z in game coordinates).
+            goal: Goal position as Point (x, y, z in game coordinates).
             jitter: path humanization amount (0=straight, 12=natural wandering)
-            start_z: player Z for multi-layer terrain selection
         Returns list of Point(x, y, z) waypoints, or None if no path.
         """
         from nav.pathfinding import find_path as _find_path
 
-        result: list[Point] | None = _find_path(
-            self,
-            start_x,
-            start_y,
-            goal_x,
-            goal_y,
-            max_nodes,
-            jitter=jitter,
-            near_z=start_z,
-        )
-        return result
+        return _find_path(self, start, goal, max_nodes, jitter=jitter)
 
     def check_cliff_ahead(
         self, game_x: float, game_y: float, heading: float, look_dist: float = 20.0, max_drop: float = 100.0

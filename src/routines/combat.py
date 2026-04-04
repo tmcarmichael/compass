@@ -499,7 +499,7 @@ class CombatRoutine(RoutineBase):
         if state.is_casting:
             log.log(VERBOSE, "[COMBAT] Combat: _face_target skipped -- casting in progress")
             return
-        exact = heading_to(state.x, state.y, target.x, target.y)
+        exact = heading_to(state.pos, target.pos)
         desired = (exact + random.gauss(0, 2.0)) % 512.0
         current = state.heading
         diff = abs((desired - current + 256) % 512 - 256)
@@ -1027,7 +1027,7 @@ class CombatRoutine(RoutineBase):
                             pet_dist,
                             target_dist,
                         )
-                        exact = heading_to(state.x, state.y, sp.x, sp.y)
+                        exact = heading_to(state.pos, sp.pos)
                         _bound_rsf: ReadStateFn = rsf
 
                         def _get_heading(_reader: ReadStateFn = _bound_rsf) -> float:
@@ -1292,7 +1292,7 @@ class CombatRoutine(RoutineBase):
         )
         self._pet_save_engaged = True
         self._stand_from_med()
-        exact = heading_to(state.x, state.y, target.x, target.y)
+        exact = heading_to(state.pos, target.pos)
         assert self._read_state_fn is not None
         _rsf = self._read_state_fn
         face_heading(exact, lambda: _rsf().heading, tolerance=10.0)

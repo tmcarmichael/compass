@@ -152,7 +152,7 @@ class DeathRecoveryRoutine(RoutineBase):
 
         # Check if we're already near camp
         if self._ctx:
-            camp_dist = state.pos.dist_to(Point(self._ctx.camp.camp_x, self._ctx.camp.camp_y, 0.0))
+            camp_dist = state.pos.dist_to(self._ctx.camp.camp_pos)
             if camp_dist < 100:
                 log.info("[LIFECYCLE] DeathRecovery: already near camp (dist=%.0f), done", camp_dist)
                 self._phase = _Phase.READY
@@ -166,9 +166,9 @@ class DeathRecoveryRoutine(RoutineBase):
         if not self._ctx or not self._read_state_fn:
             return RoutineStatus.SUCCESS
 
-        camp_x = self._ctx.camp.camp_x
-        camp_y = self._ctx.camp.camp_y
-        dist = state.pos.dist_to(Point(camp_x, camp_y, 0.0))
+        camp_x = self._ctx.camp.camp_pos.x
+        camp_y = self._ctx.camp.camp_pos.y
+        dist = state.pos.dist_to(self._ctx.camp.camp_pos)
 
         if dist < 50:
             log.info(
@@ -178,7 +178,9 @@ class DeathRecoveryRoutine(RoutineBase):
             return RoutineStatus.SUCCESS
 
         log.info("[LIFECYCLE] DeathRecovery: walking to camp (%.0f, %.0f) dist=%.0f", camp_x, camp_y, dist)
-        arrived = move_to_point(camp_x, camp_y, self._read_state_fn, arrival_tolerance=40.0, timeout=60.0)
+        arrived = move_to_point(
+            Point(camp_x, camp_y, 0.0), self._read_state_fn, arrival_tolerance=40.0, timeout=60.0
+        )
 
         if arrived:
             log.info("[LIFECYCLE] DeathRecovery: arrived at camp. Resuming.")

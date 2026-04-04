@@ -76,7 +76,7 @@ class MobProfile:
     # Temporal
     is_moving: bool
     speed: float
-    velocity: tuple[float, float]
+    velocity: tuple[float, float, float]
     predicted_pos_5s: Point
 
     # Combat estimation
@@ -510,7 +510,7 @@ def _heading_multiplier(p: MobProfile, w: ScoringWeights, player_x: float, playe
     """Heading safety multiplier: facing us = risky, facing away = safer."""
     if p.distance >= 80 or p.distance <= 0:
         return 1.0
-    angle_to_player = heading_to(p.spawn.x, p.spawn.y, player_x, player_y)
+    angle_to_player = heading_to(p.spawn.pos, Point(player_x, player_y, 0.0))
     heading_error = abs(p.spawn.heading - angle_to_player) % 512
     if heading_error > 256:
         heading_error = 512 - heading_error

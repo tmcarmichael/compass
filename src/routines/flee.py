@@ -180,8 +180,12 @@ class FleeRoutine(RoutineBase):
 
         # Fallback to single flee point
         if self._ctx:
-            flee_x: float = self._ctx.camp.flee_x if self._ctx.camp.flee_x != 0 else self._ctx.camp.guard_x
-            flee_y: float = self._ctx.camp.flee_y if self._ctx.camp.flee_y != 0 else self._ctx.camp.guard_y
+            flee_x: float = (
+                self._ctx.camp.flee_pos.x if self._ctx.camp.flee_pos.x != 0 else self._ctx.camp.guard_pos.x
+            )
+            flee_y: float = (
+                self._ctx.camp.flee_pos.y if self._ctx.camp.flee_pos.y != 0 else self._ctx.camp.guard_pos.y
+            )
             return [Point(flee_x, flee_y, 0.0)]
         return []
 
@@ -325,16 +329,16 @@ class FleeRoutine(RoutineBase):
             if recovery is not None:
                 return recovery
             # Set TRAVEL plan back to camp before exiting
-            if self._ctx and self._ctx.camp.camp_x:
+            if self._ctx and self._ctx.camp.camp_pos.x:
                 from core.types import PlanType
 
                 self._ctx.plan.active = PlanType.TRAVEL
-                self._ctx.plan.travel.target_x = self._ctx.camp.camp_x
-                self._ctx.plan.travel.target_y = self._ctx.camp.camp_y
+                self._ctx.plan.travel.target_x = self._ctx.camp.camp_pos.x
+                self._ctx.plan.travel.target_y = self._ctx.camp.camp_pos.y
                 log.info(
                     "[LIFECYCLE] Flee: set TRAVEL back to camp (%.0f, %.0f)",
-                    self._ctx.camp.camp_x,
-                    self._ctx.camp.camp_y,
+                    self._ctx.camp.camp_pos.x,
+                    self._ctx.camp.camp_pos.y,
                 )
             log.info(
                 "[LIFECYCLE] Flee: SAFE  -  reached safety at (%.0f, %.0f) after %d waypoints",
@@ -362,8 +366,7 @@ class FleeRoutine(RoutineBase):
         )
 
         arrived = move_to_point(
-            jitter_x,
-            jitter_y,
+            Point(jitter_x, jitter_y, 0.0),
             self._read_state_fn,
             arrival_tolerance=SAFE_DISTANCE,
             timeout=45.0,

@@ -228,6 +228,10 @@ class Point(NamedTuple):
         """3D world-space distance to another point."""
         return math.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2 + (self.z - other.z) ** 2)
 
+    def dist_2d(self, other: Point) -> float:
+        """2D distance (XY plane) to another point."""
+        return math.hypot(self.x - other.x, self.y - other.y)
+
 
 class DangerZone(NamedTuple):
     """Named cylindrical danger area in state coordinates.

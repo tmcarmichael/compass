@@ -125,7 +125,7 @@ def patrol_safe_window(
         tracker = trackers.get(p.spawn.spawn_id)
         if not tracker:
             continue
-        vx, vy = tracker.velocity(p.spawn)
+        vx, vy, _vz = tracker.velocity(p.spawn)
         spd = math.sqrt(vx * vx + vy * vy)
         if spd < 0.5:
             continue  # stationary right now

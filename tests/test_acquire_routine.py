@@ -10,7 +10,7 @@ import time
 from unittest.mock import patch
 
 from brain.context import AgentContext
-from core.types import FailureCategory, GrindStyle
+from core.types import FailureCategory, GrindStyle, Point
 from perception.combat_eval import Con, set_avoid_names
 from routines.acquire import (
     MAX_TABS,
@@ -35,8 +35,7 @@ def _make_ctx(**overrides) -> AgentContext:
     """Build an AgentContext with sensible test defaults."""
     ctx = AgentContext()
     ctx.pet.alive = True
-    ctx.camp.camp_x = 0.0
-    ctx.camp.camp_y = 0.0
+    ctx.camp.camp_pos = Point(0.0, 0.0, 0.0)
     ctx.camp.roam_radius = 200.0
     # Include WHITE in target_cons so level-matched NPCs are valid targets
     ctx.zone.target_cons = frozenset({Con.WHITE, Con.BLUE, Con.LIGHT_BLUE})

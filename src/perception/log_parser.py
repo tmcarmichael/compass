@@ -99,13 +99,16 @@ class LogParser:
 
     def _open(self) -> None:
         """Open the log file and seek to the end (only read new lines)."""
+        f = None
         try:
             f = open(self._path, encoding="utf-8", errors="replace")
-            self._file = f
             f.seek(0, os.SEEK_END)
             log.info("[PERCEPTION] LogParser tailing %s (pos=%d)", self._path, f.tell())
+            self._file = f
         except OSError as e:
             log.warning("[PERCEPTION] Could not open log file %s: %s", self._path, e)
+            if f is not None:
+                f.close()
             self._file = None
 
     def _parse_line(self, body: str, events: LogEvents) -> None:
