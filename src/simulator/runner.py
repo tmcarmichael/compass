@@ -258,20 +258,26 @@ class SimulationRunner:
         suggestion = ""
         ws = build_world_state(state, self._ctx)
 
-        # If the previously suggested routine finished, move to the next plan step.
+        # If the previously suggested routine finished, advance or invalidate.
         if self._brain.active_routine is None and planner.has_plan():
-            step = planner.current_step
-            advance_ws = ws
-            if step is not None and step.routine_name == self._brain._ticked_routine_name:
-                self._apply_completed_step_context(step.routine_name, state)
-                # Synthetic scenarios often expose the world-state effects of a
-                # step one phase later than the live runtime would. Apply the
-                # completed step's modeled effects before advancing so the plan
-                # can progress across scenario boundaries instead of thrashing.
-                advance_ws = step.apply_effects(ws)
-                self._brain._ticked_routine_name = ""
-            planner.advance(advance_ws)
-            ws = advance_ws
+            last_status = self._brain._last_routine_status
+            if last_status == "failure":
+                planner.invalidate("step_failed")
+                self._brain._last_routine_status = ""
+            else:
+                step = planner.current_step
+                advance_ws = ws
+                if step is not None and step.routine_name == self._brain._ticked_routine_name:
+                    self._apply_completed_step_context(step.routine_name, state)
+                    # Synthetic scenarios often expose the world-state effects of a
+                    # step one phase later than the live runtime would. Apply the
+                    # completed step's modeled effects before advancing so the plan
+                    # can progress across scenario boundaries instead of thrashing.
+                    advance_ws = step.apply_effects(ws)
+                    self._brain._ticked_routine_name = ""
+                planner.advance(advance_ws)
+                ws = advance_ws
+                self._brain._last_routine_status = ""
 
         if planner.has_plan():
             step = planner.current_step

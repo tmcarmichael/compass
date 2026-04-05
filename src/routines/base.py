@@ -31,7 +31,7 @@ def make_flee_predicate(read_state_fn: ReadStateFn, ctx: AgentContext | None) ->
 
     def check() -> bool:
         try:
-            from brain.rules.survival import (
+            from brain.flee import (
                 FLEE_URGENCY_ENTER,
                 compute_flee_urgency,
             )

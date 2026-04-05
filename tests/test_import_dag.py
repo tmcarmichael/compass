@@ -71,10 +71,6 @@ def test_routines_do_not_import_brain_decision() -> None:
         for imp in imports:
             for prefix in forbidden:
                 if imp == prefix or imp.startswith(prefix + "."):
-                    # Exception: routines.base imports brain.rules.survival for
-                    # flee urgency check in the locked-routine safety path
-                    if "base.py" in filepath and "brain.rules.survival" in imp:
-                        continue
                     violations.append(f"{filepath}: imports {imp}")
 
     assert not violations, (

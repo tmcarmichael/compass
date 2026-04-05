@@ -44,7 +44,8 @@ class PhaseSelector(Protocol):
     ) -> _SelectResult: ...
 
 
-# Score multiplier applied when GOAP planner suggests a specific action
+# Score multiplier applied when GOAP planner suggests a specific action.
+# Retained for scoring diagnostics even though GOAP is now authoritative.
 GOAP_BOOST = 1.5
 
 
@@ -66,6 +67,57 @@ def _apply_modifiers(score: float, phase: str, rule_name: str, goap_hint: str) -
     if goap_hint and rule_name == goap_hint and score > 0:
         score *= GOAP_BOOST
     return score
+
+
+def _goap_authoritative_check(
+    brain: Brain,
+    state: GameState,
+    now: float,
+    goap_hint: str,
+    rule_eval: dict[str, str],
+    diag_results: list[str],
+    rule_times: dict[str, float],
+) -> _SelectResult | None:
+    """If GOAP suggests a routine and it passes eligibility, return it directly.
+
+    Emergency rules override GOAP: if any emergency rule fires, returns None
+    so the caller falls through to normal selection. Otherwise, if the GOAP-
+    suggested rule passes condition/cooldown/breaker checks, selects it
+    without competing on score.
+
+    Returns None when GOAP should not override (no hint, hint blocked, or
+    emergency rule active).
+    """
+    if not goap_hint:
+        return None
+
+    goap_rule: RuleDef | None = None
+    emergency_fired = False
+
+    for r in brain._rules:
+        # Quick emergency scan: if any emergency rule fires, GOAP defers
+        if r.emergency:
+            if r.name not in brain._cooldowns or now >= brain._cooldowns[r.name]:
+                breaker = brain._breakers.get(r.name)
+                if not breaker or breaker.allow():
+                    try:
+                        if r.condition(state):
+                            emergency_fired = True
+                            break
+                    except Exception:
+                        pass
+
+        if r.name == goap_hint:
+            goap_rule = r
+
+    if emergency_fired or goap_rule is None:
+        return None
+
+    # Check GOAP rule eligibility (cooldown, breaker, condition)
+    if _is_rule_blocked(brain, goap_rule, state, now, rule_eval, diag_results, rule_times):
+        return None
+
+    return goap_rule.routine, goap_rule.name, goap_rule.emergency
 
 
 def _is_rule_blocked(
@@ -179,15 +231,22 @@ def select_by_tier(
     brain: Brain, state: GameState, now: float, rule_eval: dict, diag_results: list, rule_times: dict
 ) -> tuple[RoutineBase | None, str, bool]:
     """Phase 2: within each tier, select by highest score.
-    Between tiers, higher tier (lower number) wins if any rule scores > 0."""
+    Between tiers, higher tier (lower number) wins if any rule scores > 0.
+    GOAP suggestion is authoritative (selected directly) unless an emergency
+    rule fires."""
+    phase, goap_hint = _resolve_phase_context(brain)
+
+    # GOAP authoritative: select directly if eligible and no emergency
+    goap_result = _goap_authoritative_check(brain, state, now, goap_hint, rule_eval, diag_results, rule_times)
+    if goap_result is not None:
+        return goap_result
+
     tier_groups: dict[int, list[RuleDef]] = defaultdict(list)
 
     for r in brain._rules:
         if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):
             continue
         tier_groups[r.tier].append(r)
-
-    phase, goap_hint = _resolve_phase_context(brain)
 
     for tier in sorted(tier_groups):
         scored: list[tuple[float, RuleDef]] = []
@@ -210,12 +269,18 @@ def select_weighted(
     brain: Brain, state: GameState, now: float, rule_eval: dict, diag_results: list, rule_times: dict
 ) -> tuple[RoutineBase | None, str, bool]:
     """Phase 3+: weighted cross-tier scoring.
-    Emergency rules retain hard priority. Non-emergency rules compete
-    by weight * score."""
+    Emergency rules retain hard priority. GOAP suggestion is authoritative
+    (selected directly) unless an emergency rule fires. Non-emergency rules
+    compete by weight * score as fallback."""
+    phase, goap_hint = _resolve_phase_context(brain)
+
+    # GOAP authoritative: select directly if eligible and no emergency
+    goap_result = _goap_authoritative_check(brain, state, now, goap_hint, rule_eval, diag_results, rule_times)
+    if goap_result is not None:
+        return goap_result
+
     emergency: list[tuple[float, RuleDef]] = []
     normal: list[tuple[float, RuleDef]] = []
-
-    phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
         if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):
@@ -250,13 +315,19 @@ def select_with_considerations(
 
     Rules with considerations use score_from_considerations() instead of
     score_fn(). Rules without considerations fall back to score_fn().
-    Otherwise identical to Phase 3 (emergency hard priority, weighted
-    cross-tier selection for non-emergency).
+    GOAP suggestion is authoritative (selected directly) unless an emergency
+    rule fires. Otherwise identical to Phase 3 (emergency hard priority,
+    weighted cross-tier selection for non-emergency).
     """
+    phase, goap_hint = _resolve_phase_context(brain)
+
+    # GOAP authoritative: select directly if eligible and no emergency
+    goap_result = _goap_authoritative_check(brain, state, now, goap_hint, rule_eval, diag_results, rule_times)
+    if goap_result is not None:
+        return goap_result
+
     emergency: list[tuple[float, RuleDef]] = []
     normal: list[tuple[float, RuleDef]] = []
-
-    phase, goap_hint = _resolve_phase_context(brain)
 
     for r in brain._rules:
         if _is_rule_blocked(brain, r, state, now, rule_eval, diag_results, rule_times):

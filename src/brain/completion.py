@@ -126,6 +126,7 @@ def handle_routine_completion(brain: Brain, state: GameState, status: RoutineSta
         if breaker:
             breaker.record_success()
 
+    brain._last_routine_status = str(status)
     brain._active = None
     brain._active_name = ""
     brain._active_start_time = 0.0
@@ -173,6 +174,7 @@ def hard_kill_routine(brain: Brain, state: GameState, now: float) -> None:
         if r.routine is brain._active and r.failure_cooldown > 0:
             brain._cooldowns[r.name] = now + r.failure_cooldown
             break
+    brain._last_routine_status = "failure"
     brain._active = None
     brain._active_name = ""
     brain._active_start_time = 0.0

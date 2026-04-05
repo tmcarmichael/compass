@@ -19,6 +19,7 @@ from brain.learning.scorecard import (
 )
 from brain.scoring.weight_learner import save_learned_weights
 from core.features import flags
+from routines.base import RoutineStatus
 
 if TYPE_CHECKING:
     from brain.context import AgentContext
@@ -117,9 +118,13 @@ class LearningTickHandler:
                 runner._spawn_predictor.update_from_memory(ctx.spatial_memory)
             runner._next_spawn_update = now + 60.0
 
-        # If active routine just completed, advance the plan
+        # If active routine just completed, advance or invalidate the plan
         if runner._brain._active is None and planner.has_plan():
-            planner.advance(ws)
+            if runner._brain._last_routine_status == RoutineStatus.FAILURE:
+                planner.invalidate("step_failed")
+            else:
+                planner.advance(ws)
+            runner._brain._last_routine_status = ""  # consume
 
         # If plan exists and current step is ready, return its routine
         if planner.has_plan():

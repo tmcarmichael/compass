@@ -146,12 +146,11 @@ class BrainRunner:
     @paused.setter
     def paused(self, value: bool) -> None:
         if value and not self._paused:
-            # Entering pause -- release any held movement/modifier keys
+            # Entering pause -- release all held movement/modifier keys
             try:
-                from motor.actions import move_backward_stop, move_forward_stop
+                from motor.actions import release_all_keys
 
-                move_forward_stop()
-                move_backward_stop()
+                release_all_keys()
             except (ImportError, OSError, RuntimeError) as e:
                 brain_log.debug("[LIFECYCLE] Pause key release failed: %s", e)
         self._paused = value
@@ -492,12 +491,11 @@ class BrainRunner:
             )
             if ctx.diag.forensics:
                 ctx.diag.forensics.flush("tick_crash")
-            # Safety: release held keys and exit active routine
+            # Safety: release all held keys and exit active routine
             try:
-                from motor.actions import move_backward_stop, move_forward_stop
+                from motor.actions import release_all_keys
 
-                move_forward_stop()
-                move_backward_stop()
+                release_all_keys()
                 if self._brain.active_routine:
                     self._brain.shutdown(state)
             except Exception as e:

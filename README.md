@@ -6,7 +6,7 @@
 ![CI](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml/badge.svg)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/tmcarmichael/69dbcb7758972d25fac04fe38c20482a/raw/coverage.json)](https://github.com/tmcarmichael/compass/actions/workflows/ci.yml)
 
-A layered decision architecture for intelligent behavior in a real-time 3D world.
+A layered decision architecture for autonomous agent behavior in a real-time 3D world.
 
 <p align="center">
   <img src="docs/compass-hero.png" alt="Compass" width="720">
@@ -16,7 +16,7 @@ Compass is a control architecture for agents that must perceive, decide, and act
 
 The architecture evolved in a legacy 3D MMORPG sandbox. It progressed from a monolith through reactive rules, state-machine routines, and utility scoring before arriving at goal-oriented planning. Each transition came when the previous approach broke against the world's complexity.
 
-> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output, or [`docs/walkthrough.md`](docs/walkthrough.md) for a step-by-step trace of one tick from perception to motor output.
+> **Scope.** This is a cleaned extraction from a private working repo, published as an architecture reference. Live runtime config, environment assets, and operational glue are intentionally omitted. See [docs/samples/](docs/samples/) for real session output, [`docs/walkthrough.md`](docs/walkthrough.md) for a step-by-step trace of one tick from perception to motor output, or [`EVALUATION.md`](EVALUATION.md) for what to score and what is intentionally omitted.
 
 ## Reading the Code
 

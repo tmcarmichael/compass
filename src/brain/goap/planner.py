@@ -212,7 +212,12 @@ class GOAPPlanner:
         """Called when a plan step's routine begins executing.
 
         Records the start time and estimated cost for accuracy tracking.
+        Idempotent: subsequent calls while the same step is running are
+        no-ops, preventing repeated resets of _step_start_time that would
+        corrupt step-duration learning.
         """
+        if self._step_start_time > 0:
+            return  # already tracking this step
         self._step_start_time = time.time()
         step = self.current_step
         if step:

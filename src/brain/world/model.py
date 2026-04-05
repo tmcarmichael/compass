@@ -135,16 +135,16 @@ class _MobHistory(PatrolMixin):
             return (0.0, 0.0, 0.0)
         return ((x1 - x0) / dt, (y1 - y0) / dt, (z1 - z0) / dt)
 
-    def speed(self) -> float:
-        vx, vy, _vz = self.velocity()
+    def speed(self, spawn: SpawnData | None = None) -> float:
+        vx, vy, _vz = self.velocity(spawn)
         return math.sqrt(vx * vx + vy * vy)
 
-    def predicted_pos(self, seconds: float) -> Point:
+    def predicted_pos(self, seconds: float, spawn: SpawnData | None = None) -> Point:
         """Predict position N seconds from now."""
         if not self.positions:
             return Point(0.0, 0.0, 0.0)
         _, x, y, z = self.positions[-1]
-        vx, vy, vz = self.velocity()
+        vx, vy, vz = self.velocity(spawn)
         return Point(x + vx * seconds, y + vy * seconds, z + vz * seconds)
 
     def hp_rate(self) -> float:
@@ -328,7 +328,7 @@ class WorldModel:
         # Velocity + prediction (prefer memory-read velocity)
         vel = tracker.velocity(spawn)
         spd = math.sqrt(vel[0] ** 2 + vel[1] ** 2)
-        pred_5s = tracker.predicted_pos(5.0)
+        pred_5s = tracker.predicted_pos(5.0, spawn)
 
         # Isolation: count nearby NPCs via spatial grid (O(1) per npc)
         nearby, social_npcs = self._count_nearby_npcs(spawn, mob_base, npc_grid, grid_cell, social_groups)

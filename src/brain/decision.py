@@ -104,6 +104,7 @@ class Brain:
         self.rule_scores: dict[str, float] = {}  # rule_name -> last score
         self._score_winner: str = ""  # what score-based selection would pick
         self._ticked_routine_name: str = ""  # name captured before completion clears it
+        self._last_routine_status: str = ""  # SUCCESS/FAILURE, consumed by GOAP planner
 
         # Per-rule circuit breakers (Phase 3 hardening)
         self._breakers: dict[str, CircuitBreaker] = {}
